@@ -10,7 +10,7 @@ The people counting module is a computer vision pipeline consisting of multiple 
 
 4. Output Generation: Finally, the tracking script generates an output file that contains the timestamp, the number of people detected, and confidence levels for each person. This information can be used for further analysis or monitoring.
 
-For more details and the complete implementation, you can refer to the parent repository: [GitHub Repo](https://github.com/username/repo)
+For more details and the complete implementation, you can refer to the parent repository: [boxmot](https://github.com/mikel-brostrom/boxmot)
 
 
 To use the tracking script:
