@@ -16,6 +16,9 @@
   </div>
 </div>
 
+## TLDR
+Finish the [Installation](#installation) and then head [here](./tracking/README.md) for instructions to run the test program.
+
 ## Introduction
 
 This repo contains a collections of pluggable state-of-the-art multi-object trackers for segmentation, object detection and pose estimation models. For the methods using appearance description, both heavy ([CLIPReID](https://arxiv.org/pdf/2211.13977.pdf)) and lightweight state-of-the-art ReID models ([LightMBN](https://arxiv.org/pdf/2101.10774.pdf), [OSNet](https://arxiv.org/pdf/1905.00953.pdf) and more) are available for automatic download. We provide examples on how to use this package together with popular object detection models such as: [YOLOv8, YOLOv9 and YOLOv10](https://github.com/ultralytics)
@@ -94,6 +97,13 @@ Today's multi-object tracking options are heavily dependant on the computation c
 ## Installation
 
 Start with [**Python>=3.9**](https://www.python.org/) environment.
+
+It is highly recommended to create your own Python virtual environ for the installation (shown for Python 3.10 as an example):
+```
+pyenv install 3.10
+pyenv virtualenv 3.10 <name-of-virtual-env>
+pyenv activate <name-of-virtual-env>
+``` 
 
 If you want to run the YOLOv8, YOLOv9 or YOLOv10 examples:
 
