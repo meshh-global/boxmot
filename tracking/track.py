@@ -5,6 +5,9 @@ import cv2
 import numpy as np
 from functools import partial
 from pathlib import Path
+import time
+import os
+import json
 
 import torch
 
@@ -100,15 +103,59 @@ def run(args):
     # store custom args in predictor
     yolo.predictor.custom_args = args
 
+    # Create a single output file for all detections with timestamp in the filename
+    start_timestamp = time.strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(args.project, args.name)
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f'detections_{start_timestamp}.txt')
+    
+    print(f"Output file will be created at: {output_file}")
+    
+    last_process_time = time.time()
+    fps_interval = 1.0  # 1 second interval for 1 FPS
+
+    # Create the file even if no detections are made
+    with open(output_file, 'w') as f:
+        f.write("Timestamp,Number of people detected,Confidence levels\n")
+
     for r in results:
+        current_time = time.time()
+        
+        # Process frame only if 1 second has passed since the last processed frame
+        if current_time - last_process_time >= fps_interval:
+            last_process_time = current_time
+            
+            img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
 
-        img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
+            # Get current timestamp
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        if args.show is True:
-            cv2.imshow('BoxMOT', img)     
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord(' ') or key == ord('q'):
-                break
+            # Write detections to the single output file
+            if args.save_txt:
+                try:
+                    with open(output_file, 'a') as f:
+                        # Get detections for people (assuming class 0 is person)
+                        people_detections = [box for box in r.boxes if int(box.cls) == 0]
+                        num_people = len(people_detections)
+                        
+                        # Get confidence levels for each detection
+                        confidence_levels = [float(box.conf) for box in people_detections]
+                        
+                        # Convert confidence levels to a JSON string
+                        confidence_json = json.dumps(confidence_levels)
+                        
+                        f.write(f"{timestamp},{num_people},{confidence_json}\n")
+                    print(f"Wrote detection at {timestamp}: {num_people} people, confidence levels: {confidence_json}")
+                except Exception as e:
+                    print(f"Error writing to file: {e}")
+
+            if args.show:
+                cv2.imshow('BoxMOT', img)     
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord(' ') or key == ord('q'):
+                    break
+
+    print(f"Tracking completed. Output file: {output_file}")
 
 
 def parse_opt():
