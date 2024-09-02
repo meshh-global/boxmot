@@ -116,7 +116,7 @@ def run(args):
 
     # Create the file even if no detections are made
     with open(output_file, 'w') as f:
-        f.write("Timestamp,Number of people detected,Confidence levels\n")
+        f.write("Timestamp,Number of people detected,IDs,Confidence levels\n")
 
     for r in results:
         current_time = time.time()
@@ -138,14 +138,18 @@ def run(args):
                         people_detections = [box for box in r.boxes if int(box.cls) == 0]
                         num_people = len(people_detections)
                         
+                        # Get IDs for each detection
+                        ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
+                        
                         # Get confidence levels for each detection
                         confidence_levels = [float(box.conf) for box in people_detections]
                         
-                        # Convert confidence levels to a JSON string
+                        # Convert IDs and confidence levels to JSON strings
+                        ids_json = json.dumps(ids)
                         confidence_json = json.dumps(confidence_levels)
                         
-                        f.write(f"{timestamp},{num_people},{confidence_json}\n")
-                    print(f"Wrote detection at {timestamp}: {num_people} people, confidence levels: {confidence_json}")
+                        f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
+                    print(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
                 except Exception as e:
                     print(f"Error writing to file: {e}")
 
