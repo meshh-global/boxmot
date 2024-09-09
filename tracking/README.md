@@ -22,6 +22,11 @@ To use the tracking script:
 python tracking/track.py --source 0 --classes 0 --save-txt --show --reid-model weights/osnet_x0_25_msmt17.pt-clear --name detections
 ```
 
+On a RaspberryPi (tested with RPi 5 with 8GB RAM), use the ReID model below to lighten the CPU load:
+```
+python tracking/track.py --source 0 --classes 0 --save-txt --show --reid-model osnet_x0_25_market1501.pt --name detections
+```
+
 The above assumes a camera or video source is connected and indexed as 0.
 
 The script will create an output file named `detections_YYYYMMDD_HHMMSS.txt` in the `runs/track/detections` directory. `detections` is the project name and dir. The default project is `exp`.
