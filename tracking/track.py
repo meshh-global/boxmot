@@ -142,7 +142,7 @@ def run(args):
                         ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
                         
                         # Get confidence levels for each detection
-                        confidence_levels = [float(box.conf) for box in people_detections]
+                        confidence_levels = [round(float(box.conf),2) for box in people_detections]
                         
                         # Convert IDs and confidence levels to JSON strings
                         ids_json = json.dumps(ids)
