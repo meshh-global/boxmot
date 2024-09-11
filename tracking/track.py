@@ -8,8 +8,14 @@ from pathlib import Path
 import time
 import os
 import json
-
+import boto3
+from dotenv import load_dotenv
+import signal
+import atexit
 import torch
+import multiprocessing
+from multiprocessing import Process, Queue
+import logging
 
 from boxmot import TRACKERS
 from boxmot.tracker_zoo import create_tracker
@@ -25,6 +31,33 @@ from ultralytics.utils.plotting import Annotator, colors
 from ultralytics.data.utils import VID_FORMATS
 from ultralytics.utils.plotting import save_one_box
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def load_env_vars():
+    """Load environment variables from .env file."""
+    load_dotenv()
+
+def upload_to_s3(file_path, bucket_name, object_name=None):
+    """Upload a file to an S3 bucket
+
+    :param file_path: File to upload
+    :param bucket_name: Bucket to upload to
+    :param object_name: S3 object name. If not specified then file_name is used
+    :return: True if file was uploaded, else False
+    """
+    # If S3 object_name was not specified, use file_name
+    if object_name is None:
+        object_name = os.path.basename(file_path)
+
+    # Upload the file
+    s3_client = boto3.client('s3')
+    try:
+        s3_client.upload_file(file_path, bucket_name, object_name)
+    except Exception as e:
+        logging.error(f"Error uploading file to S3: {e}")
+        return False
+    return True
 
 def on_predict_start(predictor, persist=False):
     """
@@ -56,9 +89,24 @@ def on_predict_start(predictor, persist=False):
 
     predictor.trackers = trackers
 
+def save_output_process(args, output_file):
+    """Save output file and upload to S3 if enabled"""
+    logging.info(f"Saving output file: {output_file}")
+    if args.s3_upload:
+        load_env_vars()
+        s3_bucket = os.getenv('S3_BUCKET')
+        if s3_bucket:
+            s3_object_name = f"detections/{os.path.basename(output_file)}"
+            if upload_to_s3(output_file, s3_bucket, s3_object_name):
+                logging.info(f"Successfully uploaded {output_file} to S3 bucket {s3_bucket} as {s3_object_name}")
+            else:
+                logging.error(f"Failed to upload {output_file} to S3")
+        else:
+            logging.warning("S3_BUCKET not found in .env file. Skipping S3 upload.")
 
 @torch.no_grad()
 def run(args):
+    global output_file, save_process
     
     ul_models = ['yolov8', 'yolov9', 'yolov10', 'rtdetr', 'sam']
 
@@ -109,7 +157,7 @@ def run(args):
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f'detections_{start_timestamp}.txt')
     
-    print(f"Output file will be created at: {output_file}")
+    logging.info(f"Output file will be created at: {output_file}")
     
     last_process_time = time.time()
     fps_interval = 1.0  # 1 second interval for 1 FPS
@@ -149,9 +197,9 @@ def run(args):
                         confidence_json = json.dumps(confidence_levels)
                         
                         f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
-                    print(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
+                    logging.info(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
                 except Exception as e:
-                    print(f"Error writing to file: {e}")
+                    logging.error(f"Error writing to file: {e}")
 
             if args.show:
                 cv2.imshow('BoxMOT', img)     
@@ -159,8 +207,39 @@ def run(args):
                 if key == ord(' ') or key == ord('q'):
                     break
 
-    print(f"Tracking completed. Output file: {output_file}")
+    logging.info(f"Tracking completed. Output file: {output_file}")
+    
+    # Start the save_output process
+    save_process = Process(target=save_output_process, args=(args, output_file))
+    save_process.start()
+    save_process.join(timeout=60)  # Wait for up to 60 seconds for the process to complete
 
+def handle_exit(signum, frame):
+    """Handle exit signals."""
+    logging.info("Received exit signal. Saving output...")
+    try:
+        if 'save_process' in globals() and save_process.is_alive():
+            logging.info("Waiting for save process to complete...")
+            save_process.join(timeout=60)  # Wait for up to 60 seconds
+            if save_process.is_alive():
+                logging.warning("Save process did not complete in time. Terminating...")
+                save_process.terminate()
+                save_process.join()
+        else:
+            logging.info("Starting save process...")
+            save_process = Process(target=save_output_process, args=(opt, output_file))
+            save_process.start()
+            save_process.join(timeout=60)  # Wait for up to 60 seconds
+            if save_process.is_alive():
+                logging.warning("Save process did not complete in time. Terminating...")
+                save_process.terminate()
+                save_process.join()
+    except NameError:
+        logging.error("Output file not created yet. Exiting without saving.")
+    except Exception as e:
+        logging.error(f"Error during exit: {e}")
+    finally:
+        exit(0)
 
 def parse_opt():
     parser = argparse.ArgumentParser()
@@ -215,11 +294,17 @@ def parse_opt():
                         help='print results per frame')
     parser.add_argument('--agnostic-nms', default=False, action='store_true',
                         help='class-agnostic NMS')
+    parser.add_argument('--s3-upload', action='store_true',
+                        help='upload output file to S3 bucket specified in .env file')
 
     opt = parser.parse_args()
     return opt
 
 
 if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn')
     opt = parse_opt()
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+    atexit.register(lambda: handle_exit(None, None))
     run(opt)
