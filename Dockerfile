@@ -12,7 +12,8 @@ RUN apt install -y git
 WORKDIR /usr/src/boxmot
 
 # Clone with submodules
-RUN git clone https://github.com/mikel-brostrom/boxmot.git -b master /usr/src/boxmot
+RUN git clone https://github.com/meshh-global/boxmot.git -b main /usr/src/boxmot
+# RUN git clone https://github.com/mikel-brostrom/boxmot.git -b master /usr/src/boxmot
 
 # Install pip packages
 RUN python3 -m pip install --upgrade pip poetry
