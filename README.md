@@ -108,7 +108,7 @@ pyenv activate <name-of-virtual-env>
 If you want to run the YOLOv8, YOLOv9 or YOLOv10 examples:
 
 ```
-git clone https://github.com/mikel-brostrom/boxmot.git
+git clone https://github.com/meshh-global/boxmot.git
 cd boxmot
 pip install poetry
 poetry install --with yolo  # installed boxmot + yolo dependencies
