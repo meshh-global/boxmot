@@ -16,7 +16,7 @@ import torch
 import multiprocessing
 from multiprocessing import Process, Queue
 import logging
-from beam import endpoint, Image, asgi
+from beam import endpoint, Image, function
 from pydantic import BaseModel
 
 from boxmot import TRACKERS
@@ -41,14 +41,17 @@ boxmot_image = (
         base_image="pytorch/pytorch:2.3.1-cuda11.8-cudnn8-runtime",
         python_version="python3.11",
     )
-    .add_commands(["apt update -y", "apt install git -y"])
-    .add_commands("cd /usr/src/boxmot")
-    .add_commands(["git clone https://github.com/meshh-global/boxmot.git -b main /usr/src/boxmot"])
-    .add_commands(["python3 -m pip install --upgrade pip poetry"])
-    .add_commands(["poetry config virtualenvs.create false"])
-    # use base environment directly, avoiding the need to spawn an interactive shell
-    .add_commands(["poetry install --with yolo"])
-    .add_python_packages(["fastapi", "pydantic"])
+    .add_commands(["apt-get update -y", "apt-get install git -y"])
+    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx"])
+    .add_commands(
+        [
+            "git clone https://github.com/meshh-global/boxmot.git && cd boxmot && poetry install --with yolo",
+            "pipx install virtualenv",
+            "virtualenv boxmot-env && source boxmot-env/bin/activate",
+            "pip install boxmot"
+
+        ]
+    )
 )
 
 # Request payload for API, declared with Pydantic
@@ -126,6 +129,10 @@ def save_output_process(args, output_file):
         else:
             logging.warning("S3_BUCKET not found in .env file. Skipping S3 upload.")
 
+@function(
+    name="people-counting",
+    image=boxmot_image
+    )
 @torch.no_grad()
 def run(args):
     global output_file, save_process
@@ -323,36 +330,14 @@ def parse_opt():
     return opt
 
 
-def init_and_run_pipeline():
+@function(
+    name="people-counting",
+    image=boxmot_image
+    )
+def init_and_run_pipeline(opt):
     """Initialize and run the pipeline."""
 
-    multiprocessing.set_start_method('spawn')
-    opt = parse_opt()
-    signal.signal(signal.SIGINT, handle_exit)
-    signal.signal(signal.SIGTERM, handle_exit)
-    atexit.register(lambda: handle_exit(None, None))
-    run(opt)
-
-
-@asgi(
-    name="people-counting",
-    image=boxmot_image,
-    on_start=init_and_run_pipeline()
-    )
-def web_server(context):
-    from fastapi import FastAPI
-
-    app = FastAPI()
-
-    @app.post("/handler")
-    async def handler(input: Input):
-        return {"text": input.text}
-    
-    @app.post("/warmup")
-    async def warmup():
-        return {"status": "warm"}
-    
-    return app
+    run(opt)    
 
 
 # if __name__ == "__main__":
@@ -363,3 +348,12 @@ def web_server(context):
 #     signal.signal(signal.SIGTERM, handle_exit)
 #     atexit.register(lambda: handle_exit(None, None))
 #     run(opt)
+
+if __name__ == "__main__":
+    multiprocessing.set_start_method('spawn')
+    opt = parse_opt()
+    print(type(opt))
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+    atexit.register(lambda: handle_exit(None, None))
+    result = run.remote(opt)
