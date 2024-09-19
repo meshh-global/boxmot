@@ -8,7 +8,6 @@ from pathlib import Path
 import time
 import os
 import json
-import boto3
 from dotenv import load_dotenv
 import signal
 import atexit
@@ -16,7 +15,7 @@ import torch
 import multiprocessing
 from multiprocessing import Process, Queue
 import logging
-from beam import endpoint, Image, function
+from beam import endpoint, Image, function, CloudBucketMount  # Updated import
 from pydantic import BaseModel
 
 from boxmot import TRACKERS
@@ -52,7 +51,8 @@ boxmot_image = (
     .add_python_packages(["poetry", "fastapi", "pydantic", "pipx"])
     .add_commands(
         [
-            "git clone https://github.com/meshh-global/boxmot.git && cd boxmot && poetry install --with yolo",
+            "git clone https://github.com/meshh-global/boxmot.git -b feature/meng-477-run-cv-counting-pipeline-inference-on-beamcloud \
+                && cd boxmot && poetry install --with yolo",
             "pip install boxmot",
         ]
     )
@@ -68,7 +68,7 @@ def load_env_vars():
     load_dotenv()
 
 def upload_to_s3(file_path, bucket_name, object_name=None):
-    """Upload a file to an S3 bucket
+    """Upload a file to an S3 bucket using CloudBucketMount
 
     :param file_path: File to upload
     :param bucket_name: Bucket to upload to
@@ -79,14 +79,19 @@ def upload_to_s3(file_path, bucket_name, object_name=None):
     if object_name is None:
         object_name = os.path.basename(file_path)
 
-    # Upload the file
-    s3_client = boto3.client('s3')
+    # Create a CloudBucketMount for the S3 bucket
+    s3_mount = CloudBucketMount(bucket_name)
+
     try:
-        s3_client.upload_file(file_path, bucket_name, object_name)
+        # Copy the file to the mounted S3 bucket
+        with open(file_path, 'rb') as source_file:
+            with s3_mount.open(object_name, 'wb') as destination_file:
+                destination_file.write(source_file.read())
+        logging.info(f"Successfully uploaded {file_path} to S3 bucket {bucket_name} as {object_name}")
+        return True
     except Exception as e:
         logging.error(f"Error uploading file to S3: {e}")
         return False
-    return True
 
 def on_predict_start(predictor, persist=False):
     """
