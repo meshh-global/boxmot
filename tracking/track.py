@@ -137,7 +137,6 @@ def save_output_process(args, output_file):
     name="people-counting",
     image=boxmot_image
     )
-@torch.no_grad()
 def run(args):
     global output_file, save_process
     
@@ -199,46 +198,47 @@ def run(args):
     with open(output_file, 'w') as f:
         f.write("Timestamp,Number of people detected,IDs,Confidence levels\n")
 
-    for r in results:
-        current_time = time.time()
-        
-        # Process frame only if 1 second has passed since the last processed frame
-        if current_time - last_process_time >= fps_interval:
-            last_process_time = current_time
+    with torch.inference_mode():
+        for r in results:
+            current_time = time.time()
             
-            img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
+            # Process frame only if 1 second has passed since the last processed frame
+            if current_time - last_process_time >= fps_interval:
+                last_process_time = current_time
+                
+                img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
 
-            # Get current timestamp
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                # Get current timestamp
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Write detections to the single output file
-            if args.save_txt:
-                try:
-                    with open(output_file, 'a') as f:
-                        # Get detections for people (assuming class 0 is person)
-                        people_detections = [box for box in r.boxes if int(box.cls) == 0]
-                        num_people = len(people_detections)
-                        
-                        # Get IDs for each detection
-                        ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
-                        
-                        # Get confidence levels for each detection
-                        confidence_levels = [round(float(box.conf),2) for box in people_detections]
-                        
-                        # Convert IDs and confidence levels to JSON strings
-                        ids_json = json.dumps(ids)
-                        confidence_json = json.dumps(confidence_levels)
-                        
-                        f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
-                    logging.info(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
-                except Exception as e:
-                    logging.error(f"Error writing to file: {e}")
+                # Write detections to the single output file
+                if args.save_txt:
+                    try:
+                        with open(output_file, 'a') as f:
+                            # Get detections for people (assuming class 0 is person)
+                            people_detections = [box for box in r.boxes if int(box.cls) == 0]
+                            num_people = len(people_detections)
+                            
+                            # Get IDs for each detection
+                            ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
+                            
+                            # Get confidence levels for each detection
+                            confidence_levels = [round(float(box.conf),2) for box in people_detections]
+                            
+                            # Convert IDs and confidence levels to JSON strings
+                            ids_json = json.dumps(ids)
+                            confidence_json = json.dumps(confidence_levels)
+                            
+                            f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
+                        logging.info(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
+                    except Exception as e:
+                        logging.error(f"Error writing to file: {e}")
 
-            if args.show:
-                cv2.imshow('BoxMOT', img)     
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord(' ') or key == ord('q'):
-                    break
+                if args.show:
+                    cv2.imshow('BoxMOT', img)     
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord(' ') or key == ord('q'):
+                        break
 
     logging.info(f"Tracking completed. Output file: {output_file}")
     
@@ -343,15 +343,6 @@ def init_and_run_pipeline(opt):
 
     run(opt)    
 
-
-# if __name__ == "__main__":
-
-#     multiprocessing.set_start_method('spawn')
-#     opt = parse_opt()
-#     signal.signal(signal.SIGINT, handle_exit)
-#     signal.signal(signal.SIGTERM, handle_exit)
-#     atexit.register(lambda: handle_exit(None, None))
-#     run(opt)
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn')
