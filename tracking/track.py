@@ -36,20 +36,24 @@ from ultralytics.utils.plotting import save_one_box
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Set up the image
 boxmot_image = (
     Image(
         base_image="pytorch/pytorch:2.3.1-cuda11.8-cudnn8-runtime",
         python_version="python3.11",
     )
-    .add_commands(["apt-get update -y", "apt-get install git -y"])
+    .add_commands(
+        [
+            "apt-get update -y",
+            "apt-get install git -y",
+            "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx -y",
+        ]
+    )
     .add_python_packages(["poetry", "fastapi", "pydantic", "pipx"])
     .add_commands(
         [
             "git clone https://github.com/meshh-global/boxmot.git && cd boxmot && poetry install --with yolo",
-            "pipx install virtualenv",
-            "virtualenv boxmot-env && source boxmot-env/bin/activate",
-            "pip install boxmot"
-
+            "pip install boxmot",
         ]
     )
 )
