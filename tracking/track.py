@@ -48,7 +48,7 @@ boxmot_image = (
             "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx -y",
         ]
     )
-    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx"])
+    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv"])
     .add_commands(
         [
             "git clone https://github.com/meshh-global/boxmot.git -b feature/meng-477-run-cv-counting-pipeline-inference-on-beamcloud \
