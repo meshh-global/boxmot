@@ -15,7 +15,7 @@ import torch
 import multiprocessing
 from multiprocessing import Process, Queue
 import logging
-from beam import endpoint, Image, function, CloudBucketMount  # Updated import
+from beam import endpoint, Image, function, CloudBucket, CloudBucketConfig
 from pydantic import BaseModel
 
 from boxmot import TRACKERS
@@ -63,34 +63,48 @@ class Input(BaseModel):
     text: str
 
 
+# Set up the CloudBucket for the results
+mount_path = "./detections"
+
+result = CloudBucket(
+    name="detections",
+    mount_path=mount_path,
+    config=CloudBucketConfig(
+        access_key=os.getenv("AWS_ACCESS_KEY_ID"),
+        secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region="eu-west-2",
+    ),
+)
+
+
 def load_env_vars():
     """Load environment variables from .env file."""
     load_dotenv()
 
-def upload_to_s3(file_path, bucket_name, object_name=None):
-    """Upload a file to an S3 bucket using CloudBucketMount
 
-    :param file_path: File to upload
-    :param bucket_name: Bucket to upload to
-    :param object_name: S3 object name. If not specified then file_name is used
+@function(volumes=[result])
+def upload_to_s3(file_name):
+    """Upload a file to the CloudBucket mount path
+
+    :param file_name: Name of the file to upload
     :return: True if file was uploaded, else False
     """
-    # If S3 object_name was not specified, use file_name
-    if object_name is None:
-        object_name = os.path.basename(file_path)
-
-    # Create a CloudBucketMount for the S3 bucket
-    s3_mount = CloudBucketMount(bucket_name)
-
     try:
-        # Copy the file to the mounted S3 bucket
-        with open(file_path, 'rb') as source_file:
-            with s3_mount.open(object_name, 'wb') as destination_file:
+        source_path = os.path.join(os.getcwd(), file_name)
+        destination_path = os.path.join(result.mount_path, os.path.basename(file_name))
+        
+        if not os.path.exists(source_path):
+            logging.error(f"Source file not found: {source_path}")
+            return False
+        
+        with open(source_path, 'rb') as source_file:
+            with open(destination_path, 'wb') as destination_file:
                 destination_file.write(source_file.read())
-        logging.info(f"Successfully uploaded {file_path} to S3 bucket {bucket_name} as {object_name}")
+        
+        logging.info(f"Successfully uploaded {file_name} to CloudBucket mount path: {destination_path}")
         return True
     except Exception as e:
-        logging.error(f"Error uploading file to S3: {e}")
+        logging.error(f"Error uploading file to CloudBucket: {e}")
         return False
 
 def on_predict_start(predictor, persist=False):
@@ -124,19 +138,14 @@ def on_predict_start(predictor, persist=False):
     predictor.trackers = trackers
 
 def save_output_process(args, output_file):
-    """Save output file and upload to S3 if enabled"""
+    """Save output file and upload to CloudBucket if enabled"""
     logging.info(f"Saving output file: {output_file}")
     if args.s3_upload:
         load_env_vars()
-        s3_bucket = os.getenv('S3_BUCKET')
-        if s3_bucket:
-            s3_object_name = f"detections/{os.path.basename(output_file)}"
-            if upload_to_s3(output_file, s3_bucket, s3_object_name):
-                logging.info(f"Successfully uploaded {output_file} to S3 bucket {s3_bucket} as {s3_object_name}")
-            else:
-                logging.error(f"Failed to upload {output_file} to S3")
+        if upload_to_s3(output_file):
+            logging.info(f"Successfully uploaded {output_file} to CloudBucket")
         else:
-            logging.warning("S3_BUCKET not found in .env file. Skipping S3 upload.")
+            logging.error(f"Failed to upload {output_file} to CloudBucket")
 
 @function(
     name="people-counting",
@@ -333,7 +342,7 @@ def parse_opt():
     parser.add_argument('--agnostic-nms', default=False, action='store_true',
                         help='class-agnostic NMS')
     parser.add_argument('--s3-upload', action='store_true',
-                        help='upload output file to S3 bucket specified in .env file')
+                        help='upload output file to CloudBucket specified in .env file')
 
     opt = parser.parse_args()
     return opt
