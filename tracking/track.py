@@ -15,7 +15,7 @@ import torch
 import multiprocessing
 from multiprocessing import Process, Queue
 import logging
-from beam import endpoint, Image, function, CloudBucket, CloudBucketConfig
+from beam import endpoint, Image, function, env, CloudBucket, CloudBucketConfig
 from pydantic import BaseModel
 
 from boxmot import TRACKERS
@@ -24,10 +24,11 @@ from boxmot.utils import ROOT, WEIGHTS, TRACKER_CONFIGS
 from boxmot.utils.checks import RequirementsChecker
 from tracking.detectors import get_yolo_inferer
 
-import ipaddress
-import pyroute2
-import wireguard_py
-from wireguard_py.wireguard_common import Endpoint
+if env.is_remote():
+    import ipaddress
+    import pyroute2
+    import wireguard_py
+    from wireguard_py.wireguard_common import Endpoint
 
 checker = RequirementsChecker()
 checker.check_packages(('ultralytics @ git+https://github.com/mikel-brostrom/ultralytics.git', ))  # install
@@ -53,7 +54,7 @@ boxmot_image = (
             "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx iproute2 iptables wireguard -y",
         ]
     )
-    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv"])
+    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv", "pyroute2", "wireguard-py", "ipaddress"])
     .add_commands(
         [
             "git clone https://github.com/meshh-global/boxmot.git -b feature/meng-477-run-cv-counting-pipeline-inference-on-beamcloud \
