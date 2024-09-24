@@ -24,6 +24,11 @@ from boxmot.utils import ROOT, WEIGHTS, TRACKER_CONFIGS
 from boxmot.utils.checks import RequirementsChecker
 from tracking.detectors import get_yolo_inferer
 
+import ipaddress
+import pyroute2
+import wireguard_py
+from wireguard_py.wireguard_common import Endpoint
+
 checker = RequirementsChecker()
 checker.check_packages(('ultralytics @ git+https://github.com/mikel-brostrom/ultralytics.git', ))  # install
 
@@ -45,7 +50,7 @@ boxmot_image = (
         [
             "apt-get update -y",
             "apt-get install git -y",
-            "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx -y",
+            "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx iproute2 iptables wireguard -y",
         ]
     )
     .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv"])
@@ -53,7 +58,7 @@ boxmot_image = (
         [
             "git clone https://github.com/meshh-global/boxmot.git -b feature/meng-477-run-cv-counting-pipeline-inference-on-beamcloud \
                 && cd boxmot && poetry install --with yolo",
-            "pip install boxmot",
+            "pip install boxmot"
         ]
     )
 )
@@ -76,11 +81,67 @@ result = CloudBucket(
     ),
 )
 
+vpn_config = CloudBucket(
+    name="vpn-config",
+    mount_path="./vpn-config",
+    config=CloudBucketConfig(
+        access_key=os.getenv("AWS_ACCESS_KEY_ID"),
+        secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region="eu-west-2",
+    ),
+)
 
 def load_env_vars():
     """Load environment variables from .env file."""
     load_dotenv()
 
+def setup_wireguard():
+    """Set up WireGuard tunnel"""
+    try:
+        # Read WireGuard configuration
+        with open('./vpn-config/wg.conf', 'r') as f:
+            wg_config = f.read()
+
+        # Read private key
+        with open('./vpn-config/beam.private', 'r') as f:
+            private_key = f.read().strip()
+
+        # Parse WireGuard configuration
+        config = wireguard_py.Config(wg_config)
+
+        # Set up WireGuard interface
+        with pyroute2.IPRoute() as ipr:
+            ipr.link('add', ifname='wg0', kind='wireguard')
+            idx = ipr.link_lookup(ifname='wg0')[0]
+            ipr.link('set', index=idx, state='up')
+
+        # Configure WireGuard interface
+        with pyroute2.WireGuard() as wg:
+            wg.set('wg0', private_key=private_key, listen_port=config.listen_port)
+
+            # Add peer
+            peer = config.peers[0]
+            wg.set('wg0', peer={
+                'public_key': peer.public_key,
+                'endpoint_addr': peer.endpoint.split(':')[0],
+                'endpoint_port': int(peer.endpoint.split(':')[1]),
+                'allowed_ips': peer.allowed_ips,
+            })
+
+        logging.info("WireGuard tunnel set up successfully")
+    except Exception as e:
+        logging.error(f"Error setting up WireGuard tunnel: {e}")
+        raise
+
+def cleanup_wireguard():
+    """Clean up WireGuard tunnel"""
+    try:
+        with pyroute2.IPRoute() as ipr:
+            idx = ipr.link_lookup(ifname='wg0')[0]
+            ipr.link('del', index=idx)
+        logging.info("WireGuard tunnel cleaned up successfully")
+    except Exception as e:
+        logging.error(f"Error cleaning up WireGuard tunnel: {e}")
 
 @function(volumes=[result])
 def upload_to_s3(file_name):
@@ -149,117 +210,126 @@ def save_output_process(args, output_file):
 
 @function(
     name="people-counting",
-    image=boxmot_image
+    image=boxmot_image,
+    volumes=[vpn_config]
     )
 def run(args):
     global output_file, save_process
     
-    ul_models = ['yolov8', 'yolov9', 'yolov10', 'rtdetr', 'sam']
+    try:
+        # Set up WireGuard tunnel
+        setup_wireguard()
 
-    yolo = YOLO(
-        args.yolo_model if any(yolo in str(args.yolo_model) for yolo in ul_models) else 'yolov8n.pt',
-    )
+        ul_models = ['yolov8', 'yolov9', 'yolov10', 'rtdetr', 'sam']
 
-    results = yolo.track(
-        source=args.source,
-        conf=args.conf,
-        iou=args.iou,
-        agnostic_nms=args.agnostic_nms,
-        show=False,
-        stream=True,
-        device=args.device,
-        show_conf=args.show_conf,
-        save_txt=args.save_txt,
-        show_labels=args.show_labels,
-        save=args.save,
-        verbose=args.verbose,
-        exist_ok=args.exist_ok,
-        project=args.project,
-        name=args.name,
-        classes=args.classes,
-        imgsz=args.imgsz,
-        vid_stride=args.vid_stride,
-        line_width=args.line_width
-    )
-
-    yolo.add_callback('on_predict_start', partial(on_predict_start, persist=True))
-
-    if not any(yolo in str(args.yolo_model) for yolo in ul_models):
-        # replace yolov8 model
-        m = get_yolo_inferer(args.yolo_model)
-        model = m(
-            model=args.yolo_model,
-            device=yolo.predictor.device,
-            args=yolo.predictor.args
+        yolo = YOLO(
+            args.yolo_model if any(yolo in str(args.yolo_model) for yolo in ul_models) else 'yolov8n.pt',
         )
-        yolo.predictor.model = model
 
-    # store custom args in predictor
-    yolo.predictor.custom_args = args
+        results = yolo.track(
+            source=args.source,
+            conf=args.conf,
+            iou=args.iou,
+            agnostic_nms=args.agnostic_nms,
+            show=False,
+            stream=True,
+            device=args.device,
+            show_conf=args.show_conf,
+            save_txt=args.save_txt,
+            show_labels=args.show_labels,
+            save=args.save,
+            verbose=args.verbose,
+            exist_ok=args.exist_ok,
+            project=args.project,
+            name=args.name,
+            classes=args.classes,
+            imgsz=args.imgsz,
+            vid_stride=args.vid_stride,
+            line_width=args.line_width
+        )
 
-    # Create a single output file for all detections with timestamp in the filename
-    start_timestamp = time.strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(args.project, args.name)
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f'detections_{start_timestamp}.txt')
-    
-    logging.info(f"Output file will be created at: {output_file}")
-    
-    last_process_time = time.time()
-    fps_interval = 1.0  # 1 second interval for 1 FPS
+        yolo.add_callback('on_predict_start', partial(on_predict_start, persist=True))
 
-    # Create the file even if no detections are made
-    with open(output_file, 'w') as f:
-        f.write("Timestamp,Number of people detected,IDs,Confidence levels\n")
+        if not any(yolo in str(args.yolo_model) for yolo in ul_models):
+            # replace yolov8 model
+            m = get_yolo_inferer(args.yolo_model)
+            model = m(
+                model=args.yolo_model,
+                device=yolo.predictor.device,
+                args=yolo.predictor.args
+            )
+            yolo.predictor.model = model
 
-    with torch.inference_mode():
-        for r in results:
-            current_time = time.time()
-            
-            # Process frame only if 1 second has passed since the last processed frame
-            if current_time - last_process_time >= fps_interval:
-                last_process_time = current_time
+        # store custom args in predictor
+        yolo.predictor.custom_args = args
+
+        # Create a single output file for all detections with timestamp in the filename
+        start_timestamp = time.strftime("%Y%m%d_%H%M%S")
+        output_dir = os.path.join(args.project, args.name)
+        os.makedirs(output_dir, exist_ok=True)
+        output_file = os.path.join(output_dir, f'detections_{start_timestamp}.txt')
+        
+        logging.info(f"Output file will be created at: {output_file}")
+        
+        last_process_time = time.time()
+        fps_interval = 1.0  # 1 second interval for 1 FPS
+
+        # Create the file even if no detections are made
+        with open(output_file, 'w') as f:
+            f.write("Timestamp,Number of people detected,IDs,Confidence levels\n")
+
+        with torch.inference_mode():
+            for r in results:
+                current_time = time.time()
                 
-                img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
+                # Process frame only if 1 second has passed since the last processed frame
+                if current_time - last_process_time >= fps_interval:
+                    last_process_time = current_time
+                    
+                    img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
 
-                # Get current timestamp
-                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                    # Get current timestamp
+                    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
-                # Write detections to the single output file
-                if args.save_txt:
-                    try:
-                        with open(output_file, 'a') as f:
-                            # Get detections for people (assuming class 0 is person)
-                            people_detections = [box for box in r.boxes if int(box.cls) == 0]
-                            num_people = len(people_detections)
-                            
-                            # Get IDs for each detection
-                            ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
-                            
-                            # Get confidence levels for each detection
-                            confidence_levels = [round(float(box.conf),2) for box in people_detections]
-                            
-                            # Convert IDs and confidence levels to JSON strings
-                            ids_json = json.dumps(ids)
-                            confidence_json = json.dumps(confidence_levels)
-                            
-                            f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
-                        logging.info(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
-                    except Exception as e:
-                        logging.error(f"Error writing to file: {e}")
+                    # Write detections to the single output file
+                    if args.save_txt:
+                        try:
+                            with open(output_file, 'a') as f:
+                                # Get detections for people (assuming class 0 is person)
+                                people_detections = [box for box in r.boxes if int(box.cls) == 0]
+                                num_people = len(people_detections)
+                                
+                                # Get IDs for each detection
+                                ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
+                                
+                                # Get confidence levels for each detection
+                                confidence_levels = [round(float(box.conf),2) for box in people_detections]
+                                
+                                # Convert IDs and confidence levels to JSON strings
+                                ids_json = json.dumps(ids)
+                                confidence_json = json.dumps(confidence_levels)
+                                
+                                f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
+                            logging.info(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
+                        except Exception as e:
+                            logging.error(f"Error writing to file: {e}")
 
-                if args.show:
-                    cv2.imshow('BoxMOT', img)     
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord(' ') or key == ord('q'):
-                        break
+                    if args.show:
+                        cv2.imshow('BoxMOT', img)     
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == ord(' ') or key == ord('q'):
+                            break
 
-    logging.info(f"Tracking completed. Output file: {output_file}")
-    
-    # Start the save_output process
-    save_process = Process(target=save_output_process, args=(args, output_file))
-    save_process.start()
-    save_process.join(timeout=60)  # Wait for up to 60 seconds for the process to complete
+        logging.info(f"Tracking completed. Output file: {output_file}")
+        
+        # Start the save_output process
+        save_process = Process(target=save_output_process, args=(args, output_file))
+        save_process.start()
+        save_process.join(timeout=60)  # Wait for up to 60 seconds for the process to complete
+
+    finally:
+        # Clean up WireGuard tunnel
+        cleanup_wireguard()
 
 def handle_exit(signum, frame):
     """Handle exit signals."""
@@ -286,6 +356,7 @@ def handle_exit(signum, frame):
     except Exception as e:
         logging.error(f"Error during exit: {e}")
     finally:
+        cleanup_wireguard()
         exit(0)
 
 def parse_opt():
@@ -350,7 +421,8 @@ def parse_opt():
 
 @function(
     name="people-counting",
-    image=boxmot_image
+    image=boxmot_image,
+    volumes=[vpn_config]
     )
 def init_and_run_pipeline(opt):
     """Initialize and run the pipeline."""
