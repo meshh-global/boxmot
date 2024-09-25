@@ -70,10 +70,10 @@ class Input(BaseModel):
 
 
 # Set up the CloudBucket for the results
-mount_path = "./detections"
+mount_path = "./meshh-mona"
 
 result = CloudBucket(
-    name="detections",
+    name="meshh-mona",
     mount_path=mount_path,
     config=CloudBucketConfig(
         access_key="AWS_ACCESS_KEY_ID",
@@ -83,8 +83,8 @@ result = CloudBucket(
 )
 
 vpn_config = CloudBucket(
-    name="vpn-config",
-    mount_path="./vpn-config",
+    name="meshh-mona",
+    mount_path="./meshh-mona",
     config=CloudBucketConfig(
         access_key="AWS_ACCESS_KEY_ID",
         secret_key="AWS_SECRET_ACCESS_KEY",
@@ -96,15 +96,17 @@ def load_env_vars():
     """Load environment variables from .env file."""
     load_dotenv()
 
+
+@function(volumes=[vpn_config])
 def setup_wireguard():
     """Set up WireGuard tunnel"""
     try:
         # Read WireGuard configuration
-        with open('./vpn-config/wg.conf', 'r') as f:
+        with open('./meshh-mona/vpn-config/wg.conf', 'r') as f:
             wg_config = f.read()
 
         # Read private key
-        with open('./vpn-config/beam.private', 'r') as f:
+        with open('./meshh-mona/vpn-config/beam.private', 'r') as f:
             private_key = f.read().strip()
 
         # Parse WireGuard configuration
@@ -153,6 +155,7 @@ def upload_to_s3(file_name):
     """
     try:
         source_path = os.path.join(os.getcwd(), file_name)
+        result.mount_path = os.path.join(result.mount_path, 'detections')
         destination_path = os.path.join(result.mount_path, os.path.basename(file_name))
         
         if not os.path.exists(source_path):
