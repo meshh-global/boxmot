@@ -13,7 +13,7 @@ The people counting module is a computer vision pipeline consisting of multiple 
 For more details and the complete implementation, you can refer to the parent repository: [boxmot](https://github.com/mikel-brostrom/boxmot)
 
 
-To use the tracking script:
+To use the tracking pipeline locally (this requires a video source at /dev/video0)
 
 1. Navigate to the directory containing the `track.py` file.
 2. Run the script with the following command:
@@ -21,6 +21,15 @@ To use the tracking script:
 ```
 python tracking/track.py --source 0 --classes 0 --save-txt --show --reid-model weights/osnet_x0_25_msmt17.pt-clear --name detections
 ```
+
+To run the pipeline on the Beam.cloud serverless platform:
+
+1. Set the AWS credentials in Beam:
+```
+beam secret create AWS_ACCESS_KEY "<Your_access_key>"
+beam secret create AWS_SECRET_ACCESS_KEY "<Your_secret_access_key>"
+```
+Then run the script as in Step 2. above.
 
 On a RaspberryPi (tested with RPi 5 with 8GB RAM), use the ReID model below to lighten the CPU load:
 ```

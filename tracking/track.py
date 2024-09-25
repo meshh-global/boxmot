@@ -76,8 +76,8 @@ result = CloudBucket(
     name="detections",
     mount_path=mount_path,
     config=CloudBucketConfig(
-        access_key=os.getenv("AWS_ACCESS_KEY_ID"),
-        secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        access_key="AWS_ACCESS_KEY_ID",
+        secret_key="AWS_SECRET_ACCESS_KEY",
         region="eu-west-2",
     ),
 )
@@ -86,8 +86,8 @@ vpn_config = CloudBucket(
     name="vpn-config",
     mount_path="./vpn-config",
     config=CloudBucketConfig(
-        access_key=os.getenv("AWS_ACCESS_KEY_ID"),
-        secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        access_key="AWS_ACCESS_KEY_ID",
+        secret_key="AWS_SECRET_ACCESS_KEY",
         region="eu-west-2",
     ),
 )
