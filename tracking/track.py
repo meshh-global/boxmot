@@ -24,10 +24,6 @@ from boxmot.utils import ROOT, WEIGHTS, TRACKER_CONFIGS
 from boxmot.utils.checks import RequirementsChecker
 from tracking.detectors import get_yolo_inferer
 
-if env.is_remote():
-    import ipaddress
-    import pyroute2
-
 checker = RequirementsChecker()
 checker.check_packages(('ultralytics @ git+https://github.com/mikel-brostrom/ultralytics.git', ))  # install
 
@@ -52,8 +48,7 @@ boxmot_image = (
             "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx iproute2 iptables wireguard -y",
         ]
     )
-    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv", 
-                          "pyroute2", "wireguard-py", "wgconfig" "ipaddress"])
+    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv"])
     .add_commands(
         [
             "git clone https://github.com/meshh-global/boxmot.git -b feature/meng-477-run-cv-counting-pipeline-inference-on-beamcloud \
@@ -128,7 +123,7 @@ def setup_wireguard():
     except Exception as e:
         logging.error(f"Unexpected error setting up WireGuard tunnel: {e}")
         raise
-    
+
 
 def cleanup_wireguard():
     """Clean up WireGuard tunnel"""
@@ -222,7 +217,7 @@ def run(args):
     
     try:
         # Set up WireGuard tunnel
-        setup_wireguard()
+        setup_wireguard().remote()
 
         ul_models = ['yolov8', 'yolov9', 'yolov10', 'rtdetr', 'sam']
 
@@ -333,7 +328,7 @@ def run(args):
 
     finally:
         # Clean up WireGuard tunnel
-        cleanup_wireguard()
+        cleanup_wireguard().remote()
 
 def handle_exit(signum, frame):
     """Handle exit signals."""
@@ -421,17 +416,6 @@ def parse_opt():
 
     opt = parser.parse_args()
     return opt
-
-
-@function(
-    name="people-counting",
-    image=boxmot_image,
-    volumes=[vpn_config]
-    )
-def init_and_run_pipeline(opt):
-    """Initialize and run the pipeline."""
-
-    run(opt)    
 
 
 if __name__ == "__main__":
