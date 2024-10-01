@@ -45,7 +45,7 @@ boxmot_image = (
         [
             "apt-get update -y",
             "apt-get install git -y",
-            "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx iproute2 iptables wireguard -y",
+            "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx iproute2 iptables wireguard sudo -y",
         ]
     )
     .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv"])
@@ -108,7 +108,7 @@ def setup_wireguard():
             raise FileNotFoundError(f"Failed to copy WireGuard configuration to: {dest_path}")
         
         # Run the wg-quick up command to set up the WireGuard tunnel
-        result = os.system("wg-quick up wg0")
+        result = os.system("sudo wg-quick up wg0")
         
         if result != 0:
             raise RuntimeError(f"Failed to set up WireGuard tunnel. Command exited with status: {result}")
@@ -129,7 +129,7 @@ def cleanup_wireguard():
     """Clean up WireGuard tunnel"""
     try:
         # Run the wg-quick down command to clean up the WireGuard tunnel
-        result = os.system("wg-quick down wg0")
+        result = os.system("sudo wg-quick down wg0")
         if result != 0:
             raise RuntimeError(f"Failed to clean up WireGuard tunnel. Command exited with status: {result}")
         logging.info("WireGuard tunnel cleaned up successfully")
