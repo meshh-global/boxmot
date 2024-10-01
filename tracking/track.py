@@ -27,8 +27,6 @@ from tracking.detectors import get_yolo_inferer
 if env.is_remote():
     import ipaddress
     import pyroute2
-    import wireguard_py
-    from wireguard_py.wireguard_common import Endpoint
 
 checker = RequirementsChecker()
 checker.check_packages(('ultralytics @ git+https://github.com/mikel-brostrom/ultralytics.git', ))  # install
@@ -54,7 +52,8 @@ boxmot_image = (
             "apt-get install ffmpeg libsm6 libxext6 libgl1-mesa-glx iproute2 iptables wireguard -y",
         ]
     )
-    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv", "pyroute2", "wireguard-py", "ipaddress"])
+    .add_python_packages(["poetry", "fastapi", "pydantic", "pipx", "python-dotenv", 
+                          "pyroute2", "wireguard-py", "wgconfig" "ipaddress"])
     .add_commands(
         [
             "git clone https://github.com/meshh-global/boxmot.git -b feature/meng-477-run-cv-counting-pipeline-inference-on-beamcloud \
@@ -101,50 +100,51 @@ def load_env_vars():
 def setup_wireguard():
     """Set up WireGuard tunnel"""
     try:
-        # Read WireGuard configuration
-        with open('./meshh-mona/vpn-config/wg.conf', 'r') as f:
-            wg_config = f.read()
-
-        # Read private key
-        with open('./meshh-mona/vpn-config/beam.private', 'r') as f:
-            private_key = f.read().strip()
-
-        # Parse WireGuard configuration
-        config = wireguard_py.Config(wg_config)
-
-        # Set up WireGuard interface
-        with pyroute2.IPRoute() as ipr:
-            ipr.link('add', ifname='wg0', kind='wireguard')
-            idx = ipr.link_lookup(ifname='wg0')[0]
-            ipr.link('set', index=idx, state='up')
-
-        # Configure WireGuard interface
-        with pyroute2.WireGuard() as wg:
-            wg.set('wg0', private_key=private_key, listen_port=config.listen_port)
-
-            # Add peer
-            peer = config.peers[0]
-            wg.set('wg0', peer={
-                'public_key': peer.public_key,
-                'endpoint_addr': peer.endpoint.split(':')[0],
-                'endpoint_port': int(peer.endpoint.split(':')[1]),
-                'allowed_ips': peer.allowed_ips,
-            })
+        # Copy WireGuard configuration from ./meshh-mona/vpn-config/wg.conf to /etc/wireguard within the container
+        source_path = "./meshh-mona/vpn-config/wg.conf"
+        dest_path = "/etc/wireguard/wg0.conf"
+        
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"WireGuard configuration file not found: {source_path}")
+        
+        os.system(f"cp {source_path} {dest_path}")
+        
+        if not os.path.exists(dest_path):
+            raise FileNotFoundError(f"Failed to copy WireGuard configuration to: {dest_path}")
+        
+        # Run the wg-quick up command to set up the WireGuard tunnel
+        result = os.system("wg-quick up wg0")
+        
+        if result != 0:
+            raise RuntimeError(f"Failed to set up WireGuard tunnel. Command exited with status: {result}")
 
         logging.info("WireGuard tunnel set up successfully")
-    except Exception as e:
-        logging.error(f"Error setting up WireGuard tunnel: {e}")
+    except FileNotFoundError as e:
+        logging.error(f"File error during WireGuard setup: {e}")
         raise
+    except RuntimeError as e:
+        logging.error(f"Runtime error during WireGuard setup: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Unexpected error setting up WireGuard tunnel: {e}")
+        raise
+    
 
 def cleanup_wireguard():
     """Clean up WireGuard tunnel"""
     try:
-        with pyroute2.IPRoute() as ipr:
-            idx = ipr.link_lookup(ifname='wg0')[0]
-            ipr.link('del', index=idx)
+        # Run the wg-quick down command to clean up the WireGuard tunnel
+        result = os.system("wg-quick down wg0")
+        if result != 0:
+            raise RuntimeError(f"Failed to clean up WireGuard tunnel. Command exited with status: {result}")
         logging.info("WireGuard tunnel cleaned up successfully")
+    except IndexError:
+        logging.warning("WireGuard interface 'wg0' not found. It may have already been removed.")
+    except RuntimeError as e:
+        logging.error(f"Error cleaning up WireGuard tunnel: {e}")
     except Exception as e:
         logging.error(f"Error cleaning up WireGuard tunnel: {e}")
+
 
 @function(volumes=[result])
 def upload_to_s3(file_name):
