@@ -50,6 +50,7 @@ torchvision = [
 ]
 boto3 = "^1.35.16"
 python-dotenv = "^1.0.1"
+av = "^13.1.0"
 
 
 [tool.poetry.group.test.dependencies]
