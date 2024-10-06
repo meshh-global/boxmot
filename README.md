@@ -88,6 +88,7 @@ In inverse chronological order:
 * Added YOLOv9 and YOLOv10 support
 * Hyperparameter search for all trackers using RayTune (July 2024)
 * Added Improved Association Pipeline Tracker by [rolson24](https://github.com/rolson24) in [#1527](https://github.com/mikel-brostrom/boxmot/pull/1527) (July 2024)
+* Added support for RTP stream input (August 2024)
 
 
 ## Why BOXMOT?
@@ -113,6 +114,12 @@ cd boxmot
 pip install poetry
 poetry install --with yolo  # installed boxmot + yolo dependencies
 poetry shell  # activates the newly created environment with the installed dependencies
+```
+
+For RTP stream support, you'll need to install the PyAV library:
+
+```
+pip install av
 ```
 
 but if you only want to import the tracking modules you can simply:
@@ -169,6 +176,22 @@ $ python tracking/track.py --source 0                               # webcam
                                     path/*.jpg                      # glob
                                     'https://youtu.be/Zgi9g1ksQHc'  # YouTube
                                     'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP stream
+```
+
+You can also use RTP streams as input:
+
+```bash
+$ python tracking/track.py --source rtp --rtp-config config.yaml
+```
+
+The `config.yaml` file should contain the RTP stream details:
+
+```yaml
+rtp_stream:
+  url: 'rtp://192.168.1.100:5000'
+  width: 1280
+  height: 720
+  fps: 30
 ```
 
 </details>
