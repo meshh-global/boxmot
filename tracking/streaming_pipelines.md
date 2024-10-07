@@ -1,6 +1,7 @@
 
 ## Streaming sender (UDP)
 
+### MacOS
 ```bash
 gst-launch-1.0 avfvideosrc device-index=0 ! \
 video/x-raw,width=640,height=480,framerate=30/1 ! queue ! \
@@ -9,6 +10,15 @@ x264enc tune=zerolatency bitrate=500 speed-preset=superfast ! queue ! \
 rtph264pay config-interval=1 pt=96 ! \
 udpsink host=38.128.233.122 port=5000
 
+```
+### Linux
+```bash
+gst-launch-1.0 v4l2src device=/dev/video0 ! \
+video/x-raw,width=640,height=480,framerate=30/1 ! queue ! \
+videorate max-rate=1 ! videoconvert ! queue ! \
+x264enc tune=zerolatency bitrate=500 speed-preset=superfast ! queue ! \
+rtph264pay config-interval=1 pt=96 ! \
+udpsink host=38.128.233.122 port=5000
 ```
 
 ## Streaming receiver (UDP)
