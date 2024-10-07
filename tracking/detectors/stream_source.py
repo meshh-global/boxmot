@@ -2,6 +2,7 @@ import cv2
 import yaml
 import socket
 import numpy as np
+import netifaces as ni
 
 class StreamSource:
     def __init__(self, config_path):
@@ -21,8 +22,12 @@ class StreamSource:
             self.cap.set(cv2.CAP_PROP_FPS, self.fps)
         elif self.stream_type == 'udp':
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            host, port = self.stream_url.split(':')
-            self.sock.bind((host, int(port)))
+            ni.ifaddresses('ens3')
+            ip = ni.ifaddresses('ens3')[ni.AF_INET][0]['addr']
+            print(ip)
+            proto, host, port = self.stream_url.split(':')
+            print(proto, host, port)
+            self.sock.bind((ip, int(port)))
             self.buffer_size = self.width * self.height * 3  # Assuming 3 channels (RGB)
         else:
             raise ValueError(f"Unsupported stream type: {self.stream_type}")
