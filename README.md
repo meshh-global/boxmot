@@ -178,22 +178,22 @@ $ python tracking/track.py --source 0                               # webcam
                                     'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP stream
 ```
 
-You can also use RTP streams as input:
+You can also use RTP or UDP streams as input:
 
 ```bash
-$ python tracking/track.py --source rtp --rtp-config config.yaml
+$ python tracking/track.py --source stream --stream-config config.yaml
 ```
 
-The `config.yaml` file should contain the RTP stream details:
+The `config.yaml` file should contain the stream details:
 
 ```yaml
-rtp_stream:
-  url: 'rtp://192.168.1.100:5000'
-  width: 1280
-  height: 720
-  fps: 30
+stream:
+  type: 'rtp'  # or 'udp'
+  url: 'rtp://192.168.1.100:5000'  # for RTP, or 'udp://127.0.0.1:12345' for UDP
+  width: 640
+  height: 480
+  fps: 1
 ```
-
 </details>
 
 <details>

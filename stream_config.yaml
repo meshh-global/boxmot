@@ -1,0 +1,6 @@
+stream:
+  type: 'udp'  # or 'udp'
+  url: 'udp://38.128.233.122:5000'  # for RTP, or 'udp://127.0.0.1:12345' for UDP
+  width: 640
+  height: 480
+  fps: 1

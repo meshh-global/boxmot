@@ -22,7 +22,7 @@ from boxmot.tracker_zoo import create_tracker
 from boxmot.utils import ROOT, WEIGHTS, TRACKER_CONFIGS
 from boxmot.utils.checks import RequirementsChecker
 from tracking.detectors import get_yolo_inferer
-from tracking.detectors.rtp_stream import create_rtp_source
+from tracking.detectors.stream_source import create_stream_source
 
 checker = RequirementsChecker()
 checker.check_packages(('ultralytics @ git+https://github.com/mikel-brostrom/ultralytics.git', ))  # install
@@ -115,9 +115,9 @@ def run(args):
         args.yolo_model if any(yolo in str(args.yolo_model) for yolo in ul_models) else 'yolov8n.pt',
     )
 
-    # Use RTP stream source if specified
-    if args.rtp_config:
-        source = create_rtp_source(args.rtp_config)
+    # Use stream source if specified
+    if args.stream_config:
+        source = create_stream_source(args.stream_config)
     else:
         source = args.source
 
@@ -303,8 +303,8 @@ def parse_opt():
                         help='class-agnostic NMS')
     parser.add_argument('--s3-upload', action='store_true',
                         help='upload output file to S3 bucket specified in .env file')
-    parser.add_argument('--rtp-config', type=str, default=None,
-                        help='path to YAML config file for RTP stream')
+    parser.add_argument('--stream-config', type=str, default=None,
+                        help='path to YAML config file for stream source (RTP or UDP)')
 
     opt = parser.parse_args()
     return opt

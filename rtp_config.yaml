@@ -1,5 +1,0 @@
-rtp_stream:
-  url: 'rtp://127.0.0.1:5000'
-  width: 640
-  height: 480
-  fps: 1
