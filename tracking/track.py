@@ -16,6 +16,7 @@ import torch
 import multiprocessing
 from multiprocessing import Process, Queue
 import logging
+import yaml
 
 from boxmot import TRACKERS
 from boxmot.tracker_zoo import create_tracker
@@ -117,46 +118,19 @@ def run(args):
 
     # Use stream source if specified
     if args.stream_config:
-        source = create_stream_source(args.stream_config)
+        print(f"Stream config: {args.stream_config}")
+        # Read from stream_config.yaml 
+        with open(args.stream_config, 'r') as f:
+            config = yaml.safe_load(f)
+            source = config['stream']['url']
+            print(f"Stream source: {source}")
+        cap = cv2.VideoCapture(source)
     else:
+        print(f"Source: {args.source}")
         source = args.source
+        cap = cv2.VideoCapture(source)
 
-    results = yolo.track(
-        source=source,
-        conf=args.conf,
-        iou=args.iou,
-        agnostic_nms=args.agnostic_nms,
-        show=False,
-        stream=True,
-        device=args.device,
-        show_conf=args.show_conf,
-        save_txt=args.save_txt,
-        show_labels=args.show_labels,
-        save=args.save,
-        verbose=args.verbose,
-        exist_ok=args.exist_ok,
-        project=args.project,
-        name=args.name,
-        classes=args.classes,
-        imgsz=args.imgsz,
-        vid_stride=args.vid_stride,
-        line_width=args.line_width
-    )
-
-    yolo.add_callback('on_predict_start', partial(on_predict_start, persist=True))
-
-    if not any(yolo in str(args.yolo_model) for yolo in ul_models):
-        # replace yolov8 model
-        m = get_yolo_inferer(args.yolo_model)
-        model = m(
-            model=args.yolo_model,
-            device=yolo.predictor.device,
-            args=yolo.predictor.args
-        )
-        yolo.predictor.model = model
-
-    # store custom args in predictor
-    yolo.predictor.custom_args = args
+    print(f"Source: {source}")
 
     # Create a single output file for all detections with timestamp in the filename
     start_timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -167,52 +141,65 @@ def run(args):
     logging.info(f"Output file will be created at: {output_file}")
     
     last_process_time = time.time()
-    fps_interval = 1.0  # 1 second interval for 1 FPS
+    fps_interval = 0.95  # 1 second interval for 1 FPS
 
     # Create the file even if no detections are made
     with open(output_file, 'w') as f:
         f.write("Timestamp,Number of people detected,IDs,Confidence levels\n")
 
-    for r in results:
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            print("Failed to read frame")
+            break
+
         current_time = time.time()
         
         # Process frame only if 1 second has passed since the last processed frame
         if current_time - last_process_time >= fps_interval:
             last_process_time = current_time
-            
-            img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
 
-            # Get current timestamp
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            results = yolo.track(frame, persist=True, verbose=False, conf=args.conf, iou=args.iou, 
+                                 classes=args.classes, agnostic_nms=args.agnostic_nms, 
+                                 tracker=args.tracking_method)
 
-            # Write detections to the single output file
-            if args.save_txt:
-                try:
-                    with open(output_file, 'a') as f:
-                        # Get detections for people (assuming class 0 is person)
-                        people_detections = [box for box in r.boxes if int(box.cls) == 0]
-                        num_people = len(people_detections)
-                        
-                        # Get IDs for each detection
-                        ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
-                        
-                        # Get confidence levels for each detection
-                        confidence_levels = [round(float(box.conf),2) for box in people_detections]
-                        
-                        # Convert IDs and confidence levels to JSON strings
-                        ids_json = json.dumps(ids)
-                        confidence_json = json.dumps(confidence_levels)
-                        
-                        f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
-                    logging.info(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
-                except Exception as e:
-                    logging.error(f"Error writing to file: {e}")
+            for r in results:
+                img = r.plot()
 
-            if args.show:
-                cv2.imshow('BoxMOT', img)     
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord(' ') or key == ord('q'):
-                    break
+                # Get current timestamp
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+
+                # Write detections to the single output file
+                if args.save_txt:
+                    try:
+                        with open(output_file, 'a') as f:
+                            # Get detections for people (assuming class 0 is person)
+                            people_detections = [box for box in r.boxes if int(box.cls) == 0]
+                            num_people = len(people_detections)
+                            
+                            # Get IDs for each detection
+                            ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
+                            
+                            # Get confidence levels for each detection
+                            confidence_levels = [round(float(box.conf),2) for box in people_detections]
+                            
+                            # Convert IDs and confidence levels to JSON strings
+                            ids_json = json.dumps(ids)
+                            confidence_json = json.dumps(confidence_levels)
+                            
+                            f.write(f"{timestamp},{num_people},{ids_json},{confidence_json}\n")
+                        logging.info(f"Wrote detection at {timestamp}: {num_people} people, IDs: {ids_json}, confidence levels: {confidence_json}")
+                    except Exception as e:
+                        logging.error(f"Error writing to file: {e}")
+
+                if args.show:
+                    cv2.imshow('BoxMOT', img)     
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord(' ') or key == ord('q'):
+                        break
+
+    cap.release()
+    cv2.destroyAllWindows()
 
     logging.info(f"Tracking completed. Output file: {output_file}")
     
@@ -303,7 +290,7 @@ def parse_opt():
                         help='class-agnostic NMS')
     parser.add_argument('--s3-upload', action='store_true',
                         help='upload output file to S3 bucket specified in .env file')
-    parser.add_argument('--stream-config', type=str, default=None,
+    parser.add_argument('--stream-config', type=str, default=None, 
                         help='path to YAML config file for stream source (RTP or UDP)')
 
     opt = parser.parse_args()
