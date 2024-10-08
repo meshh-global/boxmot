@@ -17,6 +17,7 @@ import multiprocessing
 from multiprocessing import Process, Queue
 import logging
 import yaml
+import netifaces as ni
 
 from boxmot import TRACKERS
 from boxmot.tracker_zoo import create_tracker
@@ -122,7 +123,9 @@ def run(args):
         # Read from stream_config.yaml 
         with open(args.stream_config, 'r') as f:
             config = yaml.safe_load(f)
-            source = config['stream']['url']
+            local_ip = ni.ifaddresses(config['stream']['rcv_interface'])[ni.AF_INET][0]['addr']
+            url = config['stream']['type'] + '://' + local_ip + ':' + config['stream']['port']
+            source = url
             print(f"Stream source: {source}")
         cap = cv2.VideoCapture(source)
     else:

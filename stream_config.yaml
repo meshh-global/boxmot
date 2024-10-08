@@ -4,3 +4,5 @@ stream:
   width: 640
   height: 480
   fps: 1
+  port: 5000
+  rcv_interface: 'ens3'
