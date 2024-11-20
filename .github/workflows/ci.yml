@@ -98,7 +98,7 @@ jobs:
       - name: Evolve set of parameters for selected tracking method
         run: |
           # reuse first set of generated det and prod
-          python tracking/evolve.py --benchmark MOT17-mini --yolo-model yolov8n.pt --reid-model osnet_x0_25_msmt17.pt --n-trials 3 --tracking-method strongsort --source ./assets/MOT17-mini/train --ci
+          python tracking/evolve.py --yolo-model yolov8n.pt --reid-model osnet_x0_25_msmt17.pt --n-trials 3 --tracking-method strongsort --source ./assets/MOT17-mini/train --ci
 
 
   mot-metrics-benchmark:
@@ -111,7 +111,7 @@ jobs:
     outputs:
       status: ${{ job.status }}
     env:
-      TRACKERS: "ocsort bytetrack botsort hybridsort deepocsort imprassoc"
+      TRACKERS: "ocsort bytetrack botsort hybridsort deepocsort imprassoc strongsort"
 
     # Timeout: https://stackoverflow.com/a/59076067/4521646
     timeout-minutes: 50
@@ -141,7 +141,7 @@ jobs:
 
       - name: Generate detections and embeddings
         run: |
-          python tracking/val.py generate_dets_embs --source ./assets/MOT17-mini/train  --yolo-model yolov10n.pt --reid-model osnet_x0_25_msmt17.pt --imgsz 320
+          python tracking/val.py generate_dets_embs --source ./assets/MOT17-mini/train  --yolo-model yolov10n.pt --reid-model osnet_x0_25_msmt17.pt --imgsz 320 --classes 0
 
       - name: Evaluation and Summarize Results
         shell: bash
@@ -149,7 +149,7 @@ jobs:
           echo "Format,Status❔,HOTA,MOTA,IDF1" > results.csv
 
           for tracker in $TRACKERS; do
-            if python3 tracking/val.py --benchmark MOT17-mini --yolo-model yolov8n.pt --reid-model osnet_x0_25_msmt17.pt --tracking-method $tracker --verbose --source ./assets/MOT17-mini/train --ci; then
+            if python3 tracking/val.py --yolo-model yolov8n.pt --reid-model osnet_x0_25_msmt17.pt --tracking-method $tracker --verbose --source ./assets/MOT17-mini/train --ci; then
               STATUS="✅"
             else
               STATUS="❌"
@@ -166,19 +166,16 @@ jobs:
             echo "$TRACKER_NAME,$STATUS,$HOTA,$MOTA,$IDF1" >> results.csv
           done
 
-          # Create a pretty table from the results.csv file
-          column -s, -t results.csv > pretty_results.txt
+          # Sort the results by HOTA in descending order
+          (head -n 1 results.csv && tail -n +2 results.csv | sort -t, -k3 -nr) > sorted_results.csv
+
+          # Create a pretty table from the sorted_results.csv file
+          column -s, -t sorted_results.csv > pretty_results.txt
 
       - name: Show Results
         shell: bash
         run: |
           cat pretty_results.txt
-
-      - name: Upload Results
-        uses: actions/upload-artifact@v3
-        with:
-          name: results-csv
-          path: pretty_results.txt
 
 
   tracking-with-pose:

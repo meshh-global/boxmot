@@ -1,13 +1,44 @@
-# Trial number:      137
-# HOTA, MOTA, IDF1:  [55.567]
-asso_func: giou
-conf_thres: 0.5122620708221085
-delta_t: 3
-det_thresh: 0
-inertia: 0.2
-iou_thresh: 0.3
-max_age: 30
-min_hits: 1
-use_byte: false
-Q_xy_scaling: 0.01
-Q_s_scaling: 0.0001
+det_thresh:
+  type: uniform
+  default: 0.6  # from the default parameters
+  range: [0, 0.6]
+
+max_age:
+  type: grid_search
+  default: 30  # from the default parameters
+  values: [10, 20, 30, 40, 50, 60]
+
+min_hits:
+  type: grid_search
+  default: 3  # from the default parameters
+  values: [1, 2, 3, 4, 5]
+
+delta_t:
+  type: grid_search
+  default: 3  # from the default parameters
+  values: [1, 2, 3, 4, 5]
+
+asso_func:
+  type: choice
+  default: iou  # from the default parameters
+  options: ['iou', 'giou', 'diou', 'ciou', 'hmiou']
+
+use_byte:
+  type: choice
+  default: false  # from the default parameters
+  options: [True, False]
+
+inertia:
+  type: uniform
+  default: 0.1  # from the default parameters
+  range: [0.1, 0.4]
+
+Q_xy_scaling:
+  type: loguniform
+  default: 0.01  # from the default parameters
+  range: [0.01, 1]
+
+Q_s_scaling:
+  type: loguniform
+  default: 0.0001  # from the default parameters
+  range: [0.0001, 1]

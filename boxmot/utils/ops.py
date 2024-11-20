@@ -2,6 +2,8 @@
 
 import numpy as np
 import torch
+import cv2
+from typing import Tuple, Union
 
 
 def xyxy2xywh(x):
@@ -119,3 +121,98 @@ def xyxy2xysr(x):
     y[..., 3] = w / (h + 1e-6)                         # aspect ratio
     y = y.reshape((4, 1))
     return y
+
+
+def letterbox(
+    img: np.ndarray,
+    new_shape: Union[int, Tuple[int, int]] = (640, 640),
+    color: Tuple[int, int, int] = (114, 114, 114),
+    auto: bool = True,
+    scaleFill: bool = False,
+    scaleup: bool = True
+) -> Tuple[np.ndarray, Tuple[float, float], Tuple[float, float]]:
+    """
+    Resizes an image to a new shape while maintaining aspect ratio, padding with color if needed.
+
+    Args:
+        img (np.ndarray): The original image in BGR format.
+        new_shape (Union[int, Tuple[int, int]], optional): Desired size as an integer (e.g., 640) 
+            or tuple (width, height). Default is (640, 640).
+        color (Tuple[int, int, int], optional): Padding color in BGR format. Default is (114, 114, 114).
+        auto (bool, optional): If True, adjusts padding to be a multiple of 32. Default is True.
+        scaleFill (bool, optional): If True, stretches the image to fill the new shape. Default is False.
+        scaleup (bool, optional): If True, allows scaling up; otherwise, only scales down. Default is True.
+
+    Returns:
+        Tuple[np.ndarray, Tuple[float, float], Tuple[float, float]]:
+            - Resized and padded image as np.ndarray.
+            - Scaling ratio used for width and height as (width_ratio, height_ratio).
+            - Padding applied to width and height as (width_padding, height_padding).
+    """
+    shape = img.shape[:2]  # current shape [height, width]
+
+    # Ensure new_shape is a tuple (width, height)
+    if isinstance(new_shape, int):
+        new_shape = (new_shape, new_shape)
+
+    # Calculate scale ratio
+    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    if not scaleup:
+        r = min(r, 1.0)  # only scale down
+
+    # Calculate new dimensions and padding
+    ratio = (r, r)
+    new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))
+    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+
+    if auto:  # minimum rectangle
+        dw, dh = np.mod(dw, 32), np.mod(dh, 32)
+    elif scaleFill:  # stretch to fill
+        dw, dh = 0.0, 0.0
+        new_unpad = new_shape
+        ratio = (new_shape[1] / shape[1], new_shape[0] / shape[0])
+
+    # Divide padding by 2 for even distribution
+    dw /= 2
+    dh /= 2
+
+    # Resize image if necessary
+    if shape[::-1] != new_unpad:
+        img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+
+    # Add border to the image
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+
+    return img, ratio, (dw, dh)
+
+
+# This preprocess differs from the current version of YOLOX preprocess, but ByteTrack uses it
+# https://github.com/ifzhang/ByteTrack/blob/d1bf0191adff59bc8fcfeaa0b33d3d1642552a99/yolox/data/data_augment.py#L189
+def yolox_preprocess(image, input_size, 
+                         mean=(0.485, 0.456, 0.406), 
+                         std=(0.229, 0.224, 0.225), 
+                         swap=(2, 0, 1)):
+    if len(image.shape) == 3:
+        padded_img = np.ones((input_size[0], input_size[1], 3)) * 114.0
+    else:
+        padded_img = np.ones(input_size) * 114.0
+    img = np.array(image)
+    r = min(input_size[0] / img.shape[0], input_size[1] / img.shape[1])
+    resized_img = cv2.resize(
+        img,
+        (int(img.shape[1] * r), int(img.shape[0] * r)),
+        interpolation=cv2.INTER_LINEAR,
+    ).astype(np.float32)
+    padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
+
+    padded_img = padded_img[:, :, ::-1]
+    padded_img /= 255.0
+    if mean is not None:
+        padded_img -= mean
+    if std is not None:
+        padded_img /= std
+    padded_img = padded_img.transpose(swap)
+    padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
+    return padded_img, r
