@@ -124,10 +124,14 @@ def run(args):
         with open(args.stream_config, 'r') as f:
             config = yaml.safe_load(f)
             local_ip = ni.ifaddresses(config['stream']['rcv_interface'])[ni.AF_INET][0]['addr']
-            url = config['stream']['type'] + '://' + local_ip + ':' + config['stream']['port']
+            url = config['stream']['url'] #config['stream']['type'] + '://' + str(local_ip) + ':' + str(config['stream']['port'])
             source = url
             print(f"Stream source: {source}")
-        cap = cv2.VideoCapture(source)
+        # cap = cv2.VideoCapture(source)
+       
+        #cap = cv2.VideoCapture("http://10.11.0.8:8889/cam1/")
+        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+
     else:
         print(f"Source: {args.source}")
         source = args.source
@@ -153,15 +157,19 @@ def run(args):
     while cap.isOpened():
         success, frame = cap.read()
         if not success:
-            print("Failed to read frame")
+            logging.error("Failed to read frame")
             break
 
         current_time = time.time()
+
+        if cv2.waitKey(25) & 0xFF == ord('q'):
+            break
         
         # Process frame only if 1 second has passed since the last processed frame
         if current_time - last_process_time >= fps_interval:
             last_process_time = current_time
-
+            logging.info("tracking frame: ")
+            logging.info(frame)
             results = yolo.track(frame, persist=True, verbose=False, conf=args.conf, iou=args.iou, 
                                  classes=args.classes, agnostic_nms=args.agnostic_nms, 
                                  tracker=args.tracking_method)
@@ -244,8 +252,8 @@ def parse_opt():
                         help='yolo model path')
     parser.add_argument('--reid-model', type=Path, default=WEIGHTS / 'osnet_x0_25_msmt17.pt',
                         help='reid model path')
-    parser.add_argument('--tracking-method', type=str, default='deepocsort',
-                        help='deepocsort, botsort, strongsort, ocsort, bytetrack, imprassoc')
+    parser.add_argument('--tracking-method', type=str, default='DeepOCSORT',
+                        help='DeepOCSORT, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str, default='0',
                         help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640],

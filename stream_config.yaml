@@ -1,8 +1,8 @@
 stream:
-  type: 'udp'  # or 'udp'
-  url: 'udp://38.128.233.122:5000'  # for RTP, or 'udp://127.0.0.1:12345' for UDP
+  type: 'rtsp'  # or 'udp'
+  url: 'rtsp://10.11.0.8:8554/cam1'  # for RTP, or 'udp://127.0.0.1:12345' for UDP
   width: 640
   height: 480
   fps: 1
-  port: 5000
+  port: 8554
   rcv_interface: 'ens3'
