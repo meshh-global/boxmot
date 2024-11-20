@@ -1,13 +1,39 @@
-# Trial number:      0
-# HOTA, MOTA, IDF1:  [37.804, 19.34, 34.483]
-appearance_thresh: 0.7636154550757781
-cmc_method: sparseOptFlow
-conf: 0.4828271520496597
-frame_rate: 30
-lambda_: 0.9764964093204093
-match_thresh: 0.22182609980772128
-new_track_thresh: 0.25855770885476126
-proximity_thresh: 0.37262205760353817
-track_buffer: 40
-track_high_thresh: 0.5
-track_low_thresh: 0.1
+track_high_thresh:
+  type: uniform
+  default: 0.6  # from the default parameters
+  range: [0.3, 0.7]
+
+track_low_thresh:
+  type: uniform
+  default: 0.1  # from the default parameters
+  range: [0.1, 0.3]
+
+new_track_thresh:
+  type: uniform
+  default: 0.7  # from the default parameters
+  range: [0.1, 0.8]
+
+track_buffer:
+  type: randint
+  default: 30  # from the default parameters
+  range: [20, 81]
+
+match_thresh:
+  type: uniform
+  default: 0.8  # from the default parameters
+  range: [0.1, 0.9]
+
+proximity_thresh:
+  type: uniform
+  default: 0.5  # from the default parameters
+  range: [0.25, 0.75]
+
+appearance_thresh:
+  type: uniform
+  default: 0.25  # from the default parameters
+  range: [0.1, 0.8]
+
+cmc_method:
+  type: choice
+  default: ecc  # from the default parameters
+  options: [sof, ecc]

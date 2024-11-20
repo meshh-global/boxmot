@@ -23,8 +23,8 @@ from boxmot import TRACKERS
 from boxmot.tracker_zoo import create_tracker
 from boxmot.utils import ROOT, WEIGHTS, TRACKER_CONFIGS
 from boxmot.utils.checks import RequirementsChecker
-from tracking.detectors import get_yolo_inferer
-from tracking.detectors.stream_source import create_stream_source
+from tracking.detectors import (get_yolo_inferer, default_imgsz,
+                                is_ultralytics_model, is_yolox_model)
 
 checker = RequirementsChecker()
 checker.check_packages(('ultralytics @ git+https://github.com/mikel-brostrom/ultralytics.git', ))  # install
@@ -111,10 +111,14 @@ def save_output_process(args, output_file):
 def run(args):
     global output_file, save_process
     
-    ul_models = ['yolov8', 'yolov9', 'yolov10', 'rtdetr', 'sam']
+    # ul_models = ['yolov8', 'yolov9', 'yolov10', 'rtdetr', 'sam']
+
+    if args.imgsz is None:
+        args.imgsz = default_imgsz(args.yolo_model)
 
     yolo = YOLO(
-        args.yolo_model if any(yolo in str(args.yolo_model) for yolo in ul_models) else 'yolov8n.pt',
+        args.yolo_model if is_ultralytics_model(args.yolo_model)
+        else 'yolov8n.pt',
     )
 
     # Use stream source if specified
@@ -137,7 +141,26 @@ def run(args):
         source = args.source
         cap = cv2.VideoCapture(source)
 
-    print(f"Source: {source}")
+    if not is_ultralytics_model(args.yolo_model):
+        # replace yolov8 model
+        m = get_yolo_inferer(args.yolo_model)
+        yolo_model = m(model=args.yolo_model, device=yolo.predictor.device,
+                       args=yolo.predictor.args)
+        yolo.predictor.model = yolo_model
+
+        # If current model is YOLOX, change the preprocess and postprocess
+        if is_yolox_model(args.yolo_model):
+            # add callback to save image paths for further processing
+            yolo.add_callback("on_predict_batch_start",
+                              lambda p: yolo_model.update_im_paths(p))
+            yolo.predictor.preprocess = (
+                lambda imgs: yolo_model.preprocess(im=imgs))
+            yolo.predictor.postprocess = (
+                lambda preds, im, im0s:
+                yolo_model.postprocess(preds=preds, im=im, im0s=im0s))
+
+    # store custom args in predictor
+    yolo.predictor.custom_args = args
 
     # Create a single output file for all detections with timestamp in the filename
     start_timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -247,6 +270,7 @@ def handle_exit(signum, frame):
         exit(0)
 
 def parse_opt():
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--yolo-model', type=Path, default=WEIGHTS / 'yolov8n',
                         help='yolo model path')
@@ -256,7 +280,7 @@ def parse_opt():
                         help='DeepOCSORT, botsort, strongsort, ocsort, bytetrack, imprassoc')
     parser.add_argument('--source', type=str, default='0',
                         help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640],
+    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=None,
                         help='inference size h,w')
     parser.add_argument('--conf', type=float, default=0.5,
                         help='confidence threshold')

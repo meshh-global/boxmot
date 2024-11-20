@@ -9,10 +9,7 @@ from collections import deque
 
 from boxmot.motion.kalman_filters.xysr_kf import KalmanFilterXYSR
 from boxmot.utils.association import associate, linear_assignment
-from boxmot.utils.iou import get_asso_func
-from boxmot.utils.iou import run_asso_func
 from boxmot.trackers.basetracker import BaseTracker
-from boxmot.utils import PerClassDecorator
 from boxmot.utils.ops import xyxy2xysr
 
 
@@ -182,22 +179,38 @@ class KalmanBoxTracker(object):
         return convert_x_to_bbox(self.kf.x)
 
 
-class OCSort(BaseTracker):
+class OcSort(BaseTracker):
+    """
+    OCSort Tracker: A tracking algorithm that utilizes motion-based tracking.
+
+    Args:
+        per_class (bool, optional): Whether to perform per-class tracking. If True, tracks are maintained separately for each object class.
+        det_thresh (float, optional): Detection confidence threshold. Detections below this threshold are ignored in the first association step.
+        max_age (int, optional): Maximum number of frames to keep a track alive without any detections.
+        min_hits (int, optional): Minimum number of hits required to confirm a track.
+        asso_threshold (float, optional): Threshold for the association step in data association. Controls the maximum distance allowed between tracklets and detections for a match.
+        delta_t (int, optional): Time delta for velocity estimation in Kalman Filter.
+        asso_func (str, optional): Association function to use for data association. Options include "iou" for IoU-based association.
+        inertia (float, optional): Weight for inertia in motion modeling. Higher values make tracks less responsive to changes.
+        use_byte (bool, optional): Whether to use BYTE association in the second association step.
+        Q_xy_scaling (float, optional): Scaling factor for the process noise covariance in the Kalman Filter for position coordinates.
+        Q_s_scaling (float, optional): Scaling factor for the process noise covariance in the Kalman Filter for scale coordinates.
+    """
     def __init__(
         self,
-        per_class=False,
-        det_thresh=0.2,
-        max_age=30,
-        min_hits=3,
-        asso_threshold=0.3,
-        delta_t=3,
-        asso_func="iou",
-        inertia=0.2,
-        use_byte=False,
-        Q_xy_scaling=0.01,
-        Q_s_scaling=0.0001
+        per_class: bool = False,
+        det_thresh: float = 0.2,
+        max_age: int = 30,
+        min_hits: int = 3,
+        asso_threshold: float = 0.3,
+        delta_t: int = 3,
+        asso_func: str = "iou",
+        inertia: float = 0.2,
+        use_byte: bool = False,
+        Q_xy_scaling: float = 0.01,
+        Q_s_scaling: float = 0.0001
     ):
-        super().__init__(max_age=max_age)
+        super().__init__(max_age=max_age, per_class=per_class, asso_func=asso_func)
         """
         Sets key parameters for SORT
         """
@@ -208,14 +221,14 @@ class OCSort(BaseTracker):
         self.frame_count = 0
         self.det_thresh = det_thresh
         self.delta_t = delta_t
-        self.asso_func = get_asso_func(asso_func)
         self.inertia = inertia
         self.use_byte = use_byte
         self.Q_xy_scaling = Q_xy_scaling
         self.Q_s_scaling = Q_s_scaling
         KalmanBoxTracker.count = 0
 
-    @PerClassDecorator
+    @BaseTracker.on_first_frame_setup
+    @BaseTracker.per_class_decorator
     def update(self, dets: np.ndarray, img: np.ndarray, embs: np.ndarray = None) -> np.ndarray:
         """
         Params:
@@ -312,7 +325,7 @@ class OCSort(BaseTracker):
         if unmatched_dets.shape[0] > 0 and unmatched_trks.shape[0] > 0:
             left_dets = dets[unmatched_dets]
             left_trks = last_boxes[unmatched_trks]
-            iou_left = run_asso_func(self.asso_func, left_dets, left_trks, w, h)
+            iou_left = self.asso_func(left_dets, left_trks)
             iou_left = np.array(iou_left)
             if iou_left.max() > self.asso_threshold:
                 """

@@ -1,6 +1,8 @@
 # Mikel Broström 🔥 Yolo Tracking 🧾 AGPL-3.0 license
 
 import numpy as np
+import torch
+from pathlib import Path
 from collections import deque
 
 from boxmot.appearance.reid_auto_backend import ReidAutoBackend
@@ -8,9 +10,7 @@ from boxmot.motion.cmc import get_cmc_method
 from boxmot.motion.kalman_filters.xysr_kf import KalmanFilterXYSR
 from boxmot.motion.kalman_filters.xywh_kf import KalmanFilterXYWH
 from boxmot.utils.association import associate, linear_assignment
-from boxmot.utils.iou import get_asso_func
 from boxmot.trackers.basetracker import BaseTracker
-from boxmot.utils import PerClassDecorator
 from boxmot.utils.ops import xyxy2xysr
 
 
@@ -222,31 +222,56 @@ class KalmanBoxTracker(object):
         return self.kf.md_for_measurement(self.bbox_to_z_func(bbox))
 
 
-class DeepOCSort(BaseTracker):
+class DeepOcSort(BaseTracker):
+    """
+    DeepOCSort Tracker: A tracking algorithm that utilizes a combination of appearance and motion-based tracking.
+
+    Args:
+        model_weights (str): Path to the model weights for ReID (Re-Identification).
+        device (str): Device on which to run the model (e.g., 'cpu' or 'cuda').
+        fp16 (bool): Whether to use half-precision (fp16) for faster inference on compatible devices.
+        per_class (bool, optional): Whether to perform per-class tracking. If True, tracks are maintained separately for each object class.
+        det_thresh (float, optional): Detection confidence threshold. Detections below this threshold will be ignored.
+        max_age (int, optional): Maximum number of frames to keep a track alive without any detections.
+        min_hits (int, optional): Minimum number of hits required to confirm a track.
+        iou_threshold (float, optional): Intersection over Union (IoU) threshold for data association.
+        delta_t (int, optional): Time delta for velocity estimation in Kalman Filter.
+        asso_func (str, optional): Association function to use for data association. Options include "iou" for IoU-based association.
+        inertia (float, optional): Weight for inertia in motion modeling. Higher values make tracks less responsive to changes.
+        w_association_emb (float, optional): Weight for the embedding-based association score.
+        alpha_fixed_emb (float, optional): Fixed alpha for updating embeddings. Controls the contribution of new and old embeddings in the ReID model.
+        aw_param (float, optional): Parameter for adaptive weighting between association costs.
+        embedding_off (bool, optional): Whether to turn off the embedding-based association.
+        cmc_off (bool, optional): Whether to turn off camera motion compensation (CMC).
+        aw_off (bool, optional): Whether to turn off adaptive weighting.
+        Q_xy_scaling (float, optional): Scaling factor for the process noise covariance in the Kalman Filter for position coordinates.
+        Q_s_scaling (float, optional): Scaling factor for the process noise covariance in the Kalman Filter for scale coordinates.
+        **kwargs: Additional arguments for future extensions or parameters.
+    """
     def __init__(
         self,
-        model_weights,
-        device,
-        fp16,
-        per_class=False,
-        det_thresh=0.3,
-        max_age=30,
-        min_hits=3,
-        iou_threshold=0.3,
-        delta_t=3,
-        asso_func="iou",
-        inertia=0.2,
-        w_association_emb=0.5,
-        alpha_fixed_emb=0.95,
-        aw_param=0.5,
-        embedding_off=False,
-        cmc_off=False,
-        aw_off=False,
-        Q_xy_scaling=0.01,
-        Q_s_scaling=0.0001,
-        **kwargs
+        reid_weights: Path,
+        device: torch.device,
+        half: bool,
+        per_class: bool = False,
+        det_thresh: float = 0.3,
+        max_age: int = 30,
+        min_hits: int = 3,
+        iou_threshold: float = 0.3,
+        delta_t: int = 3,
+        asso_func: str = "iou",
+        inertia: float = 0.2,
+        w_association_emb: float = 0.5,
+        alpha_fixed_emb: float = 0.95,
+        aw_param: float = 0.5,
+        embedding_off: bool = False,
+        cmc_off: bool = False,
+        aw_off: bool = False,
+        Q_xy_scaling: float = 0.01,
+        Q_s_scaling: float = 0.0001,
+        **kwargs: dict
     ):
-        super().__init__(max_age=max_age)
+        super().__init__(max_age=max_age, per_class=per_class, asso_func=asso_func)
         """
         Sets key parameters for SORT
         """
@@ -255,7 +280,7 @@ class DeepOCSort(BaseTracker):
         self.iou_threshold = iou_threshold
         self.det_thresh = det_thresh
         self.delta_t = delta_t
-        self.asso_func = get_asso_func(asso_func)
+        self.asso_func = asso_func
         self.inertia = inertia
         self.w_association_emb = w_association_emb
         self.alpha_fixed_emb = alpha_fixed_emb
@@ -266,7 +291,7 @@ class DeepOCSort(BaseTracker):
         KalmanBoxTracker.count = 1
 
         self.model = ReidAutoBackend(
-            weights=model_weights, device=device, half=fp16
+            weights=reid_weights, device=device, half=half
         ).model
         # "similarity transforms using feature point extraction, optical flow, and RANSAC"
         self.cmc = get_cmc_method('sof')()
@@ -274,7 +299,8 @@ class DeepOCSort(BaseTracker):
         self.cmc_off = cmc_off
         self.aw_off = aw_off
 
-    @PerClassDecorator
+    @BaseTracker.on_first_frame_setup
+    @BaseTracker.per_class_decorator
     def update(self, dets: np.ndarray, img: np.ndarray, embs: np.ndarray = None) -> np.ndarray:
         """
         Params:

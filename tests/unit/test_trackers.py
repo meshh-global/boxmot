@@ -6,26 +6,20 @@ from boxmot.utils import WEIGHTS
 
 from numpy.testing import assert_allclose
 from boxmot import (
-    StrongSORT, BoTSORT, DeepOCSORT, OCSORT, BYTETracker, ImprAssocTrack, get_tracker_config, create_tracker,
+    StrongSort, BotSort, DeepOcSort, OcSort, ByteTrack, ImprAssocTrack, get_tracker_config, create_tracker,
 )
 
 from boxmot.trackers.ocsort.ocsort import KalmanBoxTracker as OCSortKalmanBoxTracker
-from boxmot.trackers.deepocsort.deep_ocsort import KalmanBoxTracker as DeepOCSortKalmanBoxTracker
-
-
-
-MOTION_ONLY_TRACKING_METHODS=[OCSORT, BYTETracker]
-MOTION_N_APPEARANCE_TRACKING_METHODS=[StrongSORT, BoTSORT, DeepOCSORT, ImprAssocTrack]
-ALL_TRACKERS=['botsort', 'deepocsort', 'ocsort', 'bytetrack', 'strongsort', 'imprassoc']
-PER_CLASS_TRACKERS=['botsort', 'deepocsort', 'ocsort', 'bytetrack', 'imprassoc']
+from boxmot.trackers.deepocsort.deepocsort import KalmanBoxTracker as DeepOCSortKalmanBoxTracker
+from tests.test_config import MOTION_ONLY_TRACKING_METHODS, MOTION_N_APPEARANCE_TRACKING_METHODS, ALL_TRACKERS, PER_CLASS_TRACKERS
 
 
 @pytest.mark.parametrize("Tracker", MOTION_N_APPEARANCE_TRACKING_METHODS)
 def test_motion_n_appearance_trackers_instantiation(Tracker):
     Tracker(
-        model_weights=Path(WEIGHTS / 'osnet_x0_25_msmt17.pt'),
+        reid_weights=Path(WEIGHTS / 'osnet_x0_25_msmt17.pt'),
         device='cpu',
-        fp16=True,
+        half=True,
     )
 
 
@@ -56,7 +50,7 @@ def test_tracker_output_size(tracker_type):
     
 def test_dynamic_max_obs_based_on_max_age():
     max_age = 400
-    ocsort = OCSORT(
+    ocsort = OcSort(
         max_age=max_age
     )
 
@@ -84,17 +78,17 @@ def create_kalman_box_tracker_deepocsort(bbox, cls, det_ind, tracker):
 
 
 TRACKER_CREATORS = {
-    OCSORT: create_kalman_box_tracker_ocsort,
-    DeepOCSORT: create_kalman_box_tracker_deepocsort,
+    OcSort: create_kalman_box_tracker_ocsort,
+    DeepOcSort: create_kalman_box_tracker_deepocsort,
 }
 
 
 @pytest.mark.parametrize("Tracker, init_args", [
-    (OCSORT, {}),
-    (DeepOCSORT, {
-        'model_weights': Path(WEIGHTS / 'osnet_x0_25_msmt17.pt'),
+    (OcSort, {}),
+    (DeepOcSort, {
+        'reid_weights': Path(WEIGHTS / 'osnet_x0_25_msmt17.pt'),
         'device': 'cpu',
-        'fp16': True
+        'half': True
     }),
 ])
 def test_Q_matrix_scaling(Tracker, init_args):
@@ -165,3 +159,22 @@ def test_per_class_tracker_active_tracks(tracker_type):
     assert tracker.per_class_active_tracks[0], "No active tracks for class 0"
     assert tracker.per_class_active_tracks[65], "No active tracks for class 65"
 
+
+@pytest.mark.parametrize("tracker_type", ALL_TRACKERS)
+@pytest.mark.parametrize("dets", [None, np.array([])])
+def test_tracker_with_no_detections(tracker_type, dets):
+    tracker_conf = get_tracker_config(tracker_type)
+    tracker = create_tracker(
+        tracker_type=tracker_type,
+        tracker_config=tracker_conf,
+        reid_weights=WEIGHTS / 'mobilenetv2_x1_4_dukemtmcreid.pt',
+        device='cpu',
+        half=False,
+        per_class=False
+    )
+
+    rgb = np.random.randint(255, size=(640, 640, 3), dtype=np.uint8)
+    embs = np.random.random(size=(2, 512))
+    
+    output = tracker.update(dets, rgb, embs)
+    assert output.size == 0, "Output should be empty when no detections are provided"
