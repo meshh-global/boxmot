@@ -1,10 +1,18 @@
 # Mikel Broström 🔥 Yolo Tracking 🧾 AGPL-3.0 license
 
 import argparse
+import atexit
+from multiprocessing import Process, set_start_method
+import signal
 import cv2
 import numpy as np
 from functools import partial
 from pathlib import Path
+import time
+from datetime import datetime, timezone
+import json
+import logging
+from dotenv import load_dotenv
 
 import torch
 
@@ -23,6 +31,12 @@ from ultralytics.utils.plotting import Annotator, colors
 from ultralytics.data.utils import VID_FORMATS
 from ultralytics.utils.plotting import save_one_box
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def load_env_vars():
+    """Load environment variables from .env file."""
+    load_dotenv()
 
 def on_predict_start(predictor, persist=False):
     """
@@ -55,8 +69,27 @@ def on_predict_start(predictor, persist=False):
     predictor.trackers = trackers
 
 
+def save_output_process(args, output_file):
+    """Save output file and upload to S3 if enabled"""
+    logging.info(f"Saving output file: {output_file}")
+    if args.s3_upload:
+        load_env_vars()
+        s3_bucket = os.getenv('S3_BUCKET')
+        if s3_bucket:
+            s3_object_name = f"detections/{os.path.basename(output_file)}"
+            if upload_to_s3(output_file, s3_bucket, s3_object_name):
+                logging.info(f"Successfully uploaded {output_file} to S3 bucket {s3_bucket} as {s3_object_name}")
+            else:
+                logging.error(f"Failed to upload {output_file} to S3")
+        else:
+            logging.warning("S3_BUCKET not found in .env file. Skipping S3 upload.")
+
+
+
 @torch.no_grad()
 def run(args):
+    
+    global output_file, save_process
 
     if args.imgsz is None:
         args.imgsz = default_imgsz(args.yolo_model)
@@ -111,15 +144,95 @@ def run(args):
     # store custom args in predictor
     yolo.predictor.custom_args = args
 
-    for r in results:
+    # Create detection results file with timestamp in name
+    save_path = Path(args.project) / args.name
+    save_path.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_file = save_path / f'detection_results_{timestamp}.txt'
 
-        img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
+
+    logging.info(f"Output file will be created at: {output_file}")
+    
+
+    # Write header to results file
+    with open(output_file, 'w') as f:
+        f.write("datetime_utc, elapsed_time(s), total_detections, detected_ids, confidence_values\n")
+
+    start_time = time.time()
+    for r in results:
+        # Get current timestamp
+        elapsed_time = time.time() - start_time
+        current_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        
+        # Get tracking results
+
+        # if hasattr(r, 'boxes') and hasattr(r.boxes, 'id') and len(r.boxes.id) > 0:
+            # total_detections = len(r.boxes.id)
+            # detected_ids = r.boxes.id.cpu().numpy().tolist()
+            # confidence_values = r.boxes.conf.cpu().numpy().tolist()
+            
+            # Get detections for people (assuming class 0 is person)
+        
+        try:
+            people_detections = [box for box in r.boxes if int(box.cls) == 0]
+            num_people = len(people_detections)
+            
+            # Get IDs for each detection
+            ids = [int(box.id.item()) if box.id is not None else -1 for box in people_detections]
+            
+            # Get confidence levels for each detection
+            confidence_levels = [round(float(box.conf),2) for box in people_detections]
+            
+            # Convert IDs and confidence levels to JSON strings
+            people_ids = json.dumps(ids)
+            confidence_values_list = json.dumps(confidence_levels)
+            # Save results to file
+            with open(output_file, 'a') as f:
+                f.write(f"{current_utc}, {elapsed_time:.3f}, {num_people}, {people_ids}, {confidence_values_list}\n")
+        except Exception as e:
+                logging.error(f"Error writing to file: {e}")
+    
+        # img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
 
         if args.show is True:
             cv2.imshow('BoxMOT', img)     
             key = cv2.waitKey(1) & 0xFF
             if key == ord(' ') or key == ord('q'):
                 break
+    
+    logging.info(f"Tracking completed. Output file: {output_file}")
+    # Start the save_output process
+    save_process = Process(target=save_output_process, args=(args, output_file))
+    save_process.start()
+    save_process.join(timeout=60)  # Wait for up to 60 seconds for the process to complete
+
+
+def handle_exit(signum, frame):
+    """Handle exit signals."""
+    logging.info("Received exit signal. Saving output...")
+    try:
+        if 'save_process' in globals() and save_process.is_alive():
+            logging.info("Waiting for save process to complete...")
+            save_process.join(timeout=60)  # Wait for up to 60 seconds
+            if save_process.is_alive():
+                logging.warning("Save process did not complete in time. Terminating...")
+                save_process.terminate()
+                save_process.join()
+        else:
+            logging.info("Starting save process...")
+            save_process = Process(target=save_output_process, args=(opt, output_file))
+            save_process.start()
+            save_process.join(timeout=60)  # Wait for up to 60 seconds
+            if save_process.is_alive():
+                logging.warning("Save process did not complete in time. Terminating...")
+                save_process.terminate()
+                save_process.join()
+    except NameError:
+        logging.error("Output file not created yet. Exiting without saving.")
+    except Exception as e:
+        logging.error(f"Error during exit: {e}")
+    finally:
+        exit(0)
 
 
 def parse_opt():
@@ -176,11 +289,17 @@ def parse_opt():
                         help='print results per frame')
     parser.add_argument('--agnostic-nms', default=False, action='store_true',
                         help='class-agnostic NMS')
+    parser.add_argument('--s3-upload', action='store_true',
+                        help='upload output file to S3 bucket specified in .env file')
 
     opt = parser.parse_args()
     return opt
 
 
 if __name__ == "__main__":
+    set_start_method('spawn')
     opt = parse_opt()
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+    atexit.register(lambda: handle_exit(None, None))
     run(opt)
