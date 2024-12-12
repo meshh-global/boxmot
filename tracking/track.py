@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from dotenv import load_dotenv
+import polars as pl
 
 import torch
 
@@ -33,6 +34,31 @@ from ultralytics.utils.plotting import save_one_box
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Global variables for data storage
+tracking_data = {
+    'datetime_utc': [],
+    'elapsed_time(s)': [],
+    'total_detections': [],
+    'detected_ids': [],
+    'confidence_values': []
+}
+
+def save_parquet_file(data, parquet_file):
+    """Save current data to parquet file"""
+    try:
+        if data['datetime_utc']:  # Only save if there's data
+            df = pl.DataFrame({
+                'datetime_utc': data['datetime_utc'],
+                'elapsed_time(s)': data['elapsed_time(s)'],
+                'total_detections': data['total_detections'],
+                'detected_ids': data['detected_ids'],
+                'confidence_values': data['confidence_values']
+            })
+            df.write_parquet(parquet_file)
+            logging.info(f"Successfully saved parquet file: {parquet_file}")
+    except Exception as e:
+        logging.error(f"Error saving parquet file: {e}")
 
 def load_env_vars():
     """Load environment variables from .env file."""
@@ -69,27 +95,38 @@ def on_predict_start(predictor, persist=False):
     predictor.trackers = trackers
 
 
-def save_output_process(args, output_file):
-    """Save output file and upload to S3 if enabled"""
-    logging.info(f"Saving output file: {output_file}")
+def save_output_process(args, txt_file, parquet_file):
+    """Save output files and upload to S3 if enabled"""
+    logging.info(f"Saving output files: {txt_file} and {parquet_file}")
+    
+    # Save parquet file with current data
+    save_parquet_file(tracking_data, parquet_file)
+    
     if args.s3_upload:
         load_env_vars()
         s3_bucket = os.getenv('S3_BUCKET')
         if s3_bucket:
-            s3_object_name = f"detections/{os.path.basename(output_file)}"
-            if upload_to_s3(output_file, s3_bucket, s3_object_name):
-                logging.info(f"Successfully uploaded {output_file} to S3 bucket {s3_bucket} as {s3_object_name}")
+            # Upload txt file
+            txt_object_name = f"detections/{txt_file.name}"
+            if upload_to_s3(txt_file, s3_bucket, txt_object_name):
+                logging.info(f"Successfully uploaded {txt_file} to S3 bucket {s3_bucket} as {txt_object_name}")
             else:
-                logging.error(f"Failed to upload {output_file} to S3")
+                logging.error(f"Failed to upload {txt_file} to S3")
+            
+            # Upload parquet file
+            parquet_object_name = f"detections/{parquet_file.name}"
+            if upload_to_s3(parquet_file, s3_bucket, parquet_object_name):
+                logging.info(f"Successfully uploaded {parquet_file} to S3 bucket {s3_bucket} as {parquet_object_name}")
+            else:
+                logging.error(f"Failed to upload {parquet_file} to S3")
         else:
             logging.warning("S3_BUCKET not found in .env file. Skipping S3 upload.")
-
 
 
 @torch.no_grad()
 def run(args):
     
-    global output_file, save_process
+    global output_file, parquet_file, save_process, tracking_data
 
     if args.imgsz is None:
         args.imgsz = default_imgsz(args.yolo_model)
@@ -149,29 +186,31 @@ def run(args):
     save_path.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     output_file = save_path / f'detection_results_{timestamp}.txt'
+    parquet_file = save_path / f'detection_results_{timestamp}.parquet'
 
+    logging.info(f"Project root: {Path(args.project)}")
+    logging.info(f"Output files will be created at: {output_file} and {parquet_file}")
 
-    logging.info(f"Output file will be created at: {output_file}")
-    
+    # Reset tracking data
+    tracking_data = {
+        'datetime_utc': [],
+        'elapsed_time(s)': [],
+        'total_detections': [],
+        'detected_ids': [],
+        'confidence_values': []
+    }
 
     # Write header to results file
     with open(output_file, 'w') as f:
         f.write("datetime_utc, elapsed_time(s), total_detections, detected_ids, confidence_values\n")
 
     start_time = time.time()
+    frame_count = 0
     for r in results:
+        frame_count += 1
         # Get current timestamp
         elapsed_time = time.time() - start_time
         current_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-        
-        # Get tracking results
-
-        # if hasattr(r, 'boxes') and hasattr(r.boxes, 'id') and len(r.boxes.id) > 0:
-            # total_detections = len(r.boxes.id)
-            # detected_ids = r.boxes.id.cpu().numpy().tolist()
-            # confidence_values = r.boxes.conf.cpu().numpy().tolist()
-            
-            # Get detections for people (assuming class 0 is person)
         
         try:
             people_detections = [box for box in r.boxes if int(box.cls) == 0]
@@ -183,52 +222,67 @@ def run(args):
             # Get confidence levels for each detection
             confidence_levels = [round(float(box.conf),2) for box in people_detections]
             
-            # Convert IDs and confidence levels to JSON strings
+            # Convert IDs and confidence levels to JSON strings for txt file
             people_ids = json.dumps(ids)
             confidence_values_list = json.dumps(confidence_levels)
-            # Save results to file
-            with open(output_file, 'a') as f:
-                f.write(f"{current_utc}, {elapsed_time:.3f}, {num_people}, {people_ids}, {confidence_values_list}\n")
+
+            if num_people > 0:
+                # Save results to txt file
+                with open(output_file, 'a') as f:
+                    f.write(f"{current_utc}, {elapsed_time:.3f}, {num_people}, {people_ids}, {confidence_values_list}\n")
+                
+                # Append data for parquet file
+                tracking_data['datetime_utc'].append(current_utc)
+                tracking_data['elapsed_time(s)'].append(round(elapsed_time, 3))
+                tracking_data['total_detections'].append(num_people)
+                tracking_data['detected_ids'].append(ids)
+                tracking_data['confidence_values'].append(confidence_levels)
+
+                # Save parquet file periodically (every 100 frames)
+                if frame_count % 100 == 0:
+                    save_parquet_file(tracking_data, parquet_file)
+
         except Exception as e:
                 logging.error(f"Error writing to file: {e}")
     
-        # img = yolo.predictor.trackers[0].plot_results(r.orig_img, args.show_trajectories)
-
         if args.show is True:
             cv2.imshow('BoxMOT', img)     
             key = cv2.waitKey(1) & 0xFF
             if key == ord(' ') or key == ord('q'):
                 break
     
-    logging.info(f"Tracking completed. Output file: {output_file}")
-    # Start the save_output process
-    save_process = Process(target=save_output_process, args=(args, output_file))
-    save_process.start()
-    save_process.join(timeout=60)  # Wait for up to 60 seconds for the process to complete
+    # Final save of parquet file
+    save_parquet_file(tracking_data, parquet_file)
+    
+    logging.info(f"Tracking completed. Output files: {output_file} and {parquet_file}")
 
 
 def handle_exit(signum, frame):
     """Handle exit signals."""
-    logging.info("Received exit signal. Saving output...")
+    logging.info(f"Received exit signal {signum}...")
     try:
-        if 'save_process' in globals() and save_process.is_alive():
-            logging.info("Waiting for save process to complete...")
-            save_process.join(timeout=60)  # Wait for up to 60 seconds
-            if save_process.is_alive():
-                logging.warning("Save process did not complete in time. Terminating...")
-                save_process.terminate()
-                save_process.join()
-        else:
-            logging.info("Starting save process...")
-            save_process = Process(target=save_output_process, args=(opt, output_file))
-            save_process.start()
-            save_process.join(timeout=60)  # Wait for up to 60 seconds
-            if save_process.is_alive():
-                logging.warning("Save process did not complete in time. Terminating...")
-                save_process.terminate()
-                save_process.join()
+        if 'output_file' in globals() and 'parquet_file' in globals():  # Only proceed if output files exist
+            # Save parquet file immediately with current data
+            save_parquet_file(tracking_data, parquet_file)
+            
+            if 'save_process' not in globals() or not save_process.is_alive():
+                logging.info("Starting save process...")
+                save_process = Process(target=save_output_process, args=(opt, output_file, parquet_file))
+                save_process.start()
+                save_process.join(timeout=60)  # Wait for up to 60 seconds
+                if save_process.is_alive():
+                    logging.warning("Save process did not complete in time. Terminating...")
+                    save_process.terminate()
+                    save_process.join()
+            else:
+                logging.info("Save process already running...")
+                save_process.join(timeout=60)  # Wait for up to 60 seconds
+                if save_process.is_alive():
+                    logging.warning("Save process did not complete in time. Terminating...")
+                    save_process.terminate()
+                    save_process.join()
     except NameError:
-        logging.error("Output file not created yet. Exiting without saving.")
+        logging.error("Output files not created yet. Exiting without saving.")
     except Exception as e:
         logging.error(f"Error during exit: {e}")
     finally:
